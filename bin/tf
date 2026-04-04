@@ -1,0 +1,279 @@
+#!/usr/bin/env python3
+"""tf — Terraform wrapper that auto-selects tfvars based on AWS context."""
+
+import hashlib
+import os
+import subprocess
+import sys
+from dataclasses import dataclass
+
+
+class TfError(Exception):
+    pass
+
+
+def load_env_file(path: str) -> None:
+    if not os.path.isfile(path):
+        return
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            if key not in os.environ:
+                os.environ[key] = value
+
+
+@dataclass
+class TfContext:
+    profile: str
+    region: str
+
+    @classmethod
+    def from_environment(cls) -> "TfContext":
+        profile = os.environ.get("AWS_VAULT") or os.environ.get("environment")
+        if not profile:
+            raise TfError("No profile found. Set AWS_VAULT or environment.")
+
+        region = os.environ.get("AWS_DEFAULT_REGION") or os.environ.get("AWS_REGION")
+        if not region:
+            raise TfError("No region found. Set AWS_DEFAULT_REGION or AWS_REGION.")
+
+        return cls(profile=profile, region=region)
+
+
+class TfVarsFiles:
+    def __init__(self, files: list[str], deprecated: bool = False):
+        self._files = files
+        self._deprecated = deprecated
+
+    def __iter__(self):
+        return iter(self._files)
+
+    def is_using_deprecated_filenames(self) -> bool:
+        return self._deprecated
+
+    @classmethod
+    def find(cls, context: TfContext, search_dir: str = ".") -> "TfVarsFiles":
+        files = cls._find_files(context.profile, context.region, search_dir)
+        if files:
+            return cls(files)
+
+        account_id = cls._get_account_id()
+        if account_id:
+            files = cls._find_files(account_id, context.region, search_dir)
+            if files:
+                return cls(files, deprecated=True)
+
+        return cls([])
+
+    @staticmethod
+    def _get_account_id() -> str | None:
+        result = subprocess.run(
+            ["aws", "sts", "get-caller-identity",
+             "--query", "Account", "--output", "text"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return None
+        return result.stdout.strip()
+
+    @staticmethod
+    def _find_files(prefix: str, region: str, search_dir: str) -> list[str]:
+        result = []
+        base = os.path.join(search_dir, f"{prefix}.tfvars")
+        regional = os.path.join(search_dir, f"{prefix}-{region}.tfvars")
+        if os.path.isfile(base):
+            result.append(base)
+        if os.path.isfile(regional):
+            result.append(regional)
+        return result
+
+
+class TfBackend:
+    def __init__(self, account_id: str, region: str, repo_name: str):
+        self._account_id = account_id
+        self._region = region
+        self._repo_name = repo_name
+
+    @property
+    def bucket(self) -> str:
+        return f"terraform-state-{self._hashed_environment_id()}"
+
+    @property
+    def lock_table(self) -> str:
+        return f"terraform-state-{self._hashed_environment_id()}"
+
+    @property
+    def data_dir(self) -> str:
+        return f".terraform.{self._account_id}-{self._region}"
+
+    @property
+    def state_path(self) -> str:
+        return f"terraform/{self._repo_name}/main.tfstate"
+
+    def init_command(self, extra_args: list[str] | None = None) -> list[str]:
+        command = [
+            "terraform", "init",
+            f"-backend-config=key={self.state_path}",
+            f"-backend-config=bucket={self.bucket}",
+            f"-backend-config=region={self._region}",
+            f"-backend-config=dynamodb_table={self.lock_table}",
+            "-backend-config=encrypt=true",
+        ]
+        if extra_args:
+            command.extend(extra_args)
+        return command
+
+    def _hashed_environment_id(self) -> str:
+        env_id = f"{self._account_id}-{self._region}"
+        return hashlib.sha1(env_id.encode()).hexdigest()
+
+    @staticmethod
+    def _get_repo_name() -> str:
+        result = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise TfError("tf: not a git repo, or no remote.origin configured")
+
+        url = result.stdout.strip()
+        name = url.rsplit("/", 1)[-1]
+        if name.endswith(".git"):
+            name = name[:-4]
+        return name
+
+
+SUBCOMMANDS_ACCEPTING_VAR_FILE = frozenset({
+    "plan", "apply", "destroy", "import", "refresh", "console",
+})
+
+SUBCOMMANDS_NEEDING_BACKEND = SUBCOMMANDS_ACCEPTING_VAR_FILE | {"init"}
+
+SUBCOMMANDS_NEEDING_DATA_DIR = frozenset({"show", "output", "state"})
+
+
+class TfRunner:
+    def __init__(self, args: list[str]):
+        self.args = args
+        self.subcommand = self._extract_subcommand()
+
+    def _extract_subcommand(self) -> str | None:
+        skip_next = False
+        for arg in self.args:
+            if skip_next:
+                skip_next = False
+                continue
+            if arg == "-chdir":
+                skip_next = True
+                continue
+            if arg.startswith("-"):
+                continue
+            return arg
+        return None
+
+    def build_command(self, tfvars: TfVarsFiles) -> list[str]:
+        var_file_args = []
+        for var_file in tfvars:
+            var_file_args.extend(["-var-file", var_file])
+
+        result = ["terraform"]
+        subcommand_found = False
+        for arg in self.args:
+            result.append(arg)
+            if arg == self.subcommand and not subcommand_found:
+                result.extend(var_file_args)
+                subcommand_found = True
+
+        return result
+
+    def _resolve_backend(self, context: TfContext) -> TfBackend:
+        account_id = TfVarsFiles._get_account_id()
+        if not account_id:
+            raise TfError("Cannot determine AWS account ID for backend config.")
+        repo_name = TfBackend._get_repo_name()
+        return TfBackend(
+            account_id=account_id, region=context.region, repo_name=repo_name
+        )
+
+    def _run_init(self, backend: TfBackend) -> None:
+        command = backend.init_command()
+        print(f"tf: running init: {' '.join(command)}", file=sys.stderr)
+        result = subprocess.run(command)
+        if result.returncode != 0:
+            raise TfError("terraform init failed")
+
+    def call(self) -> None:
+        if self.subcommand in SUBCOMMANDS_NEEDING_DATA_DIR:
+            context = TfContext.from_environment()
+            backend = self._resolve_backend(context)
+            os.environ["TF_DATA_DIR"] = backend.data_dir
+            print(f"tf: TF_DATA_DIR={backend.data_dir}", file=sys.stderr)
+            os.execvp("terraform", ["terraform"] + self.args)
+            return
+
+        if self.subcommand not in SUBCOMMANDS_NEEDING_BACKEND:
+            os.execvp("terraform", ["terraform"] + self.args)
+            return  # execvp replaces the process; return is for testability
+
+        context = TfContext.from_environment()
+        backend = self._resolve_backend(context)
+        os.environ["TF_DATA_DIR"] = backend.data_dir
+        print(f"tf: TF_DATA_DIR={backend.data_dir}", file=sys.stderr)
+
+        if self.subcommand == "init":
+            extra_args = [a for a in self.args if a != "init"]
+            command = backend.init_command(extra_args)
+            os.execvp("terraform", command)
+            return
+
+        self._run_init(backend)
+
+        tfvars = TfVarsFiles.find(context)
+
+        if tfvars.is_using_deprecated_filenames():
+            print(
+                f"tf: using account-ID tfvars (deprecated). Rename to {context.profile}.tfvars.",
+                file=sys.stderr,
+            )
+
+        command = self.build_command(tfvars)
+
+        if self.subcommand == "plan" and not self._has_out_flag():
+            out_path = f"/tmp/{context.profile}.tfplan"
+            command.append(f"-out={out_path}")
+            print(f"tf: saving plan to {out_path}", file=sys.stderr)
+
+        if self.subcommand == "apply" and not self._has_auto_approve_flag():
+            command.append("-auto-approve")
+            print("tf: auto-approving apply", file=sys.stderr)
+
+        if list(tfvars):
+            print(f"tf: var-files: {', '.join(tfvars)}", file=sys.stderr)
+
+        os.execvp("terraform", command)
+
+    def _has_out_flag(self) -> bool:
+        return any(arg.startswith("-out=") or arg == "-out" for arg in self.args)
+
+    def _has_auto_approve_flag(self) -> bool:
+        return "-auto-approve" in self.args
+
+
+def main() -> None:
+    load_env_file("tf.env")
+    try:
+        TfRunner(sys.argv[1:]).call()
+    except TfError as e:
+        print(f"tf: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

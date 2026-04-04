@@ -1,0 +1,84 @@
+name: Terraform
+
+on:
+  workflow_call:
+    inputs:
+      aws_region:
+        required: true
+        type: string
+      aws_role_arn:
+        required: true
+        type: string
+      aws_role_duration:
+        default: "1200"
+        type: string
+      working_directory:
+        default: "./"
+        type: string
+      tf_version:
+        default: "1.14.6"
+        type: string
+      tf_apply:
+        default: "false"
+        type: string
+      environment:
+        required: true
+        type: string
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    env:
+      AWS_DEFAULT_REGION: ${{ inputs.aws_region }}
+      environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: ${{ inputs.tf_version }}
+          terraform_wrapper: false
+
+      - name: Install tf
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: kosli-dev/tf
+          path: .tf-cli
+      - run: echo "$GITHUB_WORKSPACE/.tf-cli/bin" >> $GITHUB_PATH
+
+      - name: Check formatting
+        working-directory: ${{ inputs.working_directory }}
+        run: terraform fmt --recursive -check
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+        with:
+          role-to-assume: ${{ inputs.aws_role_arn }}
+          aws-region: ${{ inputs.aws_region }}
+          role-duration-seconds: ${{ inputs.aws_role_duration }}
+          role-session-name: ${{ github.event.repository.name }}
+
+      - name: Plan
+        if: inputs.tf_apply == 'false'
+        working-directory: ${{ inputs.working_directory }}
+        run: tf plan -no-color
+
+      - name: Show plan
+        if: inputs.tf_apply == 'false'
+        working-directory: ${{ inputs.working_directory }}
+        run: tf show -no-color /tmp/${{ inputs.environment }}.tfplan > /tmp/tfplan.txt
+
+      - name: Upload plan
+        if: inputs.tf_apply == 'false'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tfplan-${{ inputs.environment }}
+          path: /tmp/tfplan.txt
+
+      - name: Apply
+        if: inputs.tf_apply == 'true'
+        working-directory: ${{ inputs.working_directory }}
+        run: tf apply
