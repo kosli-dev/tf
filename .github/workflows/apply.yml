@@ -1,0 +1,38 @@
+name: Terraform Apply
+
+on:
+  workflow_call:
+    inputs:
+      aws_region:
+        required: true
+        type: string
+      aws_role_arn:
+        required: true
+        type: string
+      aws_role_duration:
+        default: "1200"
+        type: string
+      working_directory:
+        default: "./"
+        type: string
+      tf_version:
+        default: "1.14.6"
+        type: string
+      environment:
+        required: true
+        type: string
+
+jobs:
+  apply:
+    permissions:
+      id-token: write
+      contents: write
+    uses: kosli-dev/tf/.github/workflows/base.yml@main
+    with:
+      aws_region: ${{ inputs.aws_region }}
+      aws_role_arn: ${{ inputs.aws_role_arn }}
+      aws_role_duration: ${{ inputs.aws_role_duration }}
+      working_directory: ${{ inputs.working_directory }}
+      tf_version: ${{ inputs.tf_version }}
+      environment: ${{ inputs.environment }}
+      tf_apply: "true"

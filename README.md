@@ -53,12 +53,12 @@ aws-vault exec prod -- tf apply
 
 ## GitHub Actions
 
-This repo provides a reusable workflow for Terraform plan/apply in CI. It handles checkout, AWS
-OIDC authentication, terraform installation, formatting checks, and plan artifact uploads.
+This repo provides reusable workflows for Terraform plan and apply in CI. They handle checkout,
+AWS OIDC authentication, terraform installation, formatting checks, and plan artifact uploads.
 
 ### Usage
 
-Use the reusable workflow, which is designed to be called from a matrix job:
+Call the plan workflow (designed to be used from a matrix job):
 
 ```yaml
 plan:
@@ -66,7 +66,7 @@ plan:
   permissions:
     id-token: write
     contents: write
-  uses: kosli-dev/tf/.github/workflows/base.yml@main
+  uses: kosli-dev/tf/.github/workflows/plan.yml@main
   strategy:
     fail-fast: false
     matrix:
@@ -79,9 +79,15 @@ plan:
     tf_version: v1.14.6
 ```
 
-To apply instead of plan, set `tf_apply: "true"`.
+To apply instead of plan, use `apply.yml`:
 
-### Reusable workflow inputs
+```yaml
+  uses: kosli-dev/tf/.github/workflows/apply.yml@main
+```
+
+### Workflow inputs
+
+Both `plan.yml` and `apply.yml` accept the same inputs:
 
 | Input | Required | Default | Description |
 |---|---|---|---|
@@ -91,11 +97,10 @@ To apply instead of plan, set `tf_apply: "true"`.
 | `aws_role_duration` | no | `1200` | Role session duration in seconds |
 | `working_directory` | no | `./` | Directory containing Terraform config |
 | `tf_version` | no | `1.14.6` | Terraform version to install |
-| `tf_apply` | no | `false` | Set to `true` to apply instead of plan |
 
 ### What it does
 
-**Plan** (`tf_apply: "false"`, the default):
+**Plan** (`plan.yml`):
 1. Checks out the calling repo
 2. Installs terraform and `tf`
 3. Runs `terraform fmt --recursive -check` (fails if files need reformatting)
@@ -104,7 +109,7 @@ To apply instead of plan, set `tf_apply: "true"`.
 6. Runs `tf show` to produce a human-readable plan
 7. Uploads the plan as a `tfplan-<environment>` artifact
 
-**Apply** (`tf_apply: "true"`):
+**Apply** (`apply.yml`):
 1. Steps 1–4 as above
 2. Runs `tf apply` (auto-init, auto-selects tfvars, auto-approves)
 
