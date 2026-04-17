@@ -37,7 +37,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+      - uses: hashicorp/setup-terraform@5e8dbf3c6d9deaf4193ca7a8fb23f2ac83bb6c85 # v4.0.0
         with:
           terraform_version: ${{ inputs.tf_version }}
           terraform_wrapper: false
@@ -71,12 +71,19 @@ jobs:
         working-directory: ${{ inputs.working_directory }}
         run: tf show -no-color /tmp/${{ inputs.environment }}.tfplan > /tmp/tfplan.txt
 
+      - name: Plan summary
+        run: |
+          line=$(grep -E 'No changes\.|Plan: ' /tmp/tfplan.txt)
+          echo "### ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "$line" >> $GITHUB_STEP_SUMMARY
+
       - name: Upload plan
         if: inputs.tf_apply == 'false'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: tfplan-${{ inputs.environment }}
           path: /tmp/tfplan.txt
+          archive: false
 
       - name: Apply
         if: inputs.tf_apply == 'true'
