@@ -27,7 +27,7 @@ jobs:
     permissions:
       id-token: write
       contents: write
-    uses: kosli-dev/tf/.github/workflows/base.yml@split-plan-apply-workflows
+    uses: kosli-dev/tf/.github/workflows/base.yml@main
     with:
       aws_region: ${{ inputs.aws_region }}
       aws_role_arn: ${{ inputs.aws_role_arn }}
