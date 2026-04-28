@@ -62,12 +62,10 @@ jobs:
           role-session-name: ${{ github.event.repository.name }}
 
       - name: Plan
-        if: inputs.tf_apply == 'false'
         working-directory: ${{ inputs.working_directory }}
         run: tf plan -no-color
 
       - name: Show plan
-        if: inputs.tf_apply == 'false'
         working-directory: ${{ inputs.working_directory }}
         run: tf show -no-color /tmp/${{ inputs.environment }}.tfplan > /tmp/tfplan.txt
 
@@ -78,7 +76,6 @@ jobs:
           echo "$line" >> $GITHUB_STEP_SUMMARY
 
       - name: Upload plan
-        if: inputs.tf_apply == 'false'
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: tfplan-${{ inputs.environment }}
