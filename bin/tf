@@ -95,10 +95,12 @@ class TfVarsFiles:
 
 
 class TfBackend:
-    def __init__(self, account_id: str, region: str, repo_name: str):
+    def __init__(self, account_id: str, region: str, repo_name: str,
+                 state_file_name: str = "main.tfstate"):
         self._account_id = account_id
         self._region = region
         self._repo_name = repo_name
+        self._state_file_name = state_file_name
 
     @property
     def bucket(self) -> str:
@@ -114,7 +116,7 @@ class TfBackend:
 
     @property
     def state_path(self) -> str:
-        return f"terraform/{self._repo_name}/main.tfstate"
+        return f"terraform/{self._repo_name}/{self._state_file_name}"
 
     def init_command(self, extra_args: list[str] | None = None) -> list[str]:
         command = [
@@ -198,8 +200,10 @@ class TfRunner:
         if not account_id:
             raise TfError("Cannot determine AWS account ID for backend config.")
         repo_name = TfBackend._get_repo_name()
+        state_file_name = os.environ.get("TF_STATE_FILE_NAME", "main.tfstate")
         return TfBackend(
-            account_id=account_id, region=context.region, repo_name=repo_name
+            account_id=account_id, region=context.region, repo_name=repo_name,
+            state_file_name=state_file_name,
         )
 
     def _run_init(self, backend: TfBackend) -> None:

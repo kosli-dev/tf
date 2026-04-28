@@ -125,6 +125,17 @@ Example `tf.env`:
 AWS_DEFAULT_REGION=eu-west-1
 ```
 
+### State file name
+
+By default, the Terraform state is stored at `terraform/<repo-name>/main.tfstate` in the S3
+backend bucket. If a single repo contains multiple Terraform stacks (e.g. one per subdirectory),
+set `TF_STATE_FILE_NAME` per stack so each stack writes to its own state file. The variable can
+be set in the environment or via `tf.env`:
+
+```
+TF_STATE_FILE_NAME=environment-reporter.tfstate
+```
+
 ## Development
 
 ### Prerequisites
