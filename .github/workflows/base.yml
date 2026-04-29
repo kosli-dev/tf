@@ -67,11 +67,11 @@ jobs:
 
       - name: Show plan
         working-directory: ${{ inputs.working_directory }}
-        run: tf show -no-color /tmp/${{ inputs.environment }}.tfplan > /tmp/tfplan.txt
+        run: tf show -no-color /tmp/${{ inputs.environment }}.tfplan > /tmp/${{ inputs.environment }}.plan.txt
 
       - name: Plan summary
         run: |
-          line=$(grep -E 'No changes\.|Plan: ' /tmp/tfplan.txt)
+          line=$(grep -E 'No changes\.|Plan: ' /tmp/${{ inputs.environment }}.plan.txt)
           echo "### ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
           echo "$line" >> $GITHUB_STEP_SUMMARY
 
@@ -79,7 +79,7 @@ jobs:
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: tfplan-${{ inputs.environment }}
-          path: /tmp/tfplan.txt
+          path: /tmp/${{ inputs.environment }}.plan.txt
           archive: false
 
       - name: Apply
