@@ -54,6 +54,23 @@ class TestTfBackendStatePath:
 
         assert backend_a.state_path != backend_b.state_path
 
+    def test_state_path_uses_custom_state_file_name(self):
+        backend = tf.TfBackend(account_id="123456789012", region="eu-west-1",
+                               repo_name="my-repo",
+                               state_file_name="environment-reporter.tfstate")
+
+        assert backend.state_path == \
+            "terraform/my-repo/environment-reporter.tfstate"
+
+    def test_state_path_defaults_to_main_tfstate(self):
+        backend_default = tf.TfBackend(account_id="123456789012",
+                                        region="eu-west-1", repo_name="my-repo")
+        backend_explicit = tf.TfBackend(account_id="123456789012",
+                                         region="eu-west-1", repo_name="my-repo",
+                                         state_file_name="main.tfstate")
+
+        assert backend_default.state_path == backend_explicit.state_path
+
 
 class TestTfBackendDataDir:
     def test_data_dir_includes_environment_id(self):

@@ -80,6 +80,33 @@ class TestTfRunnerInit:
         command = mock_execvp.call_args[0][1]
         assert "-upgrade" in command
 
+    def test_init_uses_tf_state_file_name_env_var(self, monkeypatch):
+        monkeypatch.setenv("AWS_VAULT", "staging")
+        monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-west-1")
+        monkeypatch.setenv("TF_STATE_FILE_NAME", "environment-reporter.tfstate")
+
+        with patch("tf.TfBackend._get_repo_name", return_value="my-repo"), \
+             patch("tf.TfVarsFiles._get_account_id", return_value="123456789012"), \
+             patch("tf.os.execvp") as mock_execvp:
+            tf.TfRunner(["init"]).call()
+
+        command = mock_execvp.call_args[0][1]
+        assert "-backend-config=key=terraform/my-repo/" \
+            "environment-reporter.tfstate" in command
+
+    def test_init_defaults_to_main_tfstate_when_env_var_unset(self, monkeypatch):
+        monkeypatch.setenv("AWS_VAULT", "staging")
+        monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-west-1")
+        monkeypatch.delenv("TF_STATE_FILE_NAME", raising=False)
+
+        with patch("tf.TfBackend._get_repo_name", return_value="my-repo"), \
+             patch("tf.TfVarsFiles._get_account_id", return_value="123456789012"), \
+             patch("tf.os.execvp") as mock_execvp:
+            tf.TfRunner(["init"]).call()
+
+        command = mock_execvp.call_args[0][1]
+        assert "-backend-config=key=terraform/my-repo/main.tfstate" in command
+
 
 class TestTfRunnerAutoInit:
     def test_plan_runs_init_before_command(self, monkeypatch):
