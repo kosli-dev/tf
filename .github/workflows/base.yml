@@ -85,4 +85,19 @@ jobs:
       - name: Apply
         if: inputs.tf_apply == 'true'
         working-directory: ${{ inputs.working_directory }}
-        run: tf apply
+        run: tf apply 2>&1 | tee /tmp/${{ inputs.environment }}.apply.txt
+
+      - name: Apply summary
+        if: inputs.tf_apply == 'true'
+        run: |
+          line=$(grep -E 'Apply complete!' /tmp/${{ inputs.environment }}.apply.txt)
+          echo "### ${{ inputs.environment }} (apply)" >> $GITHUB_STEP_SUMMARY
+          echo "$line" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload apply log
+        if: inputs.tf_apply == 'true'
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: tfapply-${{ inputs.environment }}
+          path: /tmp/${{ inputs.environment }}.apply.txt
+          archive: false
