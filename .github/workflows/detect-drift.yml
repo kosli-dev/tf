@@ -1,0 +1,139 @@
+name: Detect Drift
+
+on:
+  workflow_call:
+    inputs:
+      aws_region:
+        required: true
+        type: string
+      aws_role_arn:
+        required: true
+        type: string
+      aws_role_duration:
+        default: "1200"
+        type: string
+      working_directory:
+        default: "./"
+        type: string
+      tf_version:
+        default: "1.14.6"
+        type: string
+      environment:
+        required: true
+        type: string
+
+concurrency:
+  group: detect-drift-${{ github.repository }}-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  fetch-baseline:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      sha: ${{ steps.read.outputs.sha }}
+      drift: ${{ steps.read.outputs.drift }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+        with:
+          role-to-assume: ${{ inputs.aws_role_arn }}
+          aws-region: ${{ inputs.aws_region }}
+          role-duration-seconds: ${{ inputs.aws_role_duration }}
+          role-session-name: ${{ github.event.repository.name }}
+
+      - name: Compute state bucket name
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          HASH=$(printf '%s-%s' "$ACCOUNT_ID" "${{ inputs.aws_region }}" | sha1sum | cut -d' ' -f1)
+          echo "S3_BUCKET=terraform-state-${HASH}" >> "$GITHUB_ENV"
+
+      - name: Check baseline exists
+        run: |
+          KEY="terraform/${{ github.event.repository.name }}/drift.plan.json"
+          if ! aws s3api head-object --bucket "$S3_BUCKET" --key "$KEY" >/dev/null 2>&1; then
+            echo "::error::No drift baseline at s3://${S3_BUCKET}/${KEY} — run the apply workflow at least once to seed it."
+            exit 1
+          fi
+
+      - name: Download baseline
+        run: |
+          aws s3 cp "s3://${S3_BUCKET}/terraform/${{ github.event.repository.name }}/drift.plan.json" /tmp/drift.plan.json
+
+      - name: Read baseline
+        id: read
+        run: |
+          SHA=$(jq -r '.sha' /tmp/drift.plan.json)
+          DRIFT=$(jq -r '.drift | tostring' /tmp/drift.plan.json)
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "drift=${DRIFT}" >> "$GITHUB_OUTPUT"
+          echo "### ${{ inputs.environment }} (baseline)" >> "$GITHUB_STEP_SUMMARY"
+          echo "sha: \`${SHA}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "drift: \`${DRIFT}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  plan:
+    needs: fetch-baseline
+    if: needs.fetch-baseline.outputs.drift == 'false'
+    permissions:
+      id-token: write
+      contents: read
+    uses: kosli-dev/tf/.github/workflows/base.yml@main
+    with:
+      aws_region: ${{ inputs.aws_region }}
+      aws_role_arn: ${{ inputs.aws_role_arn }}
+      aws_role_duration: ${{ inputs.aws_role_duration }}
+      working_directory: ${{ inputs.working_directory }}
+      tf_version: ${{ inputs.tf_version }}
+      environment: ${{ inputs.environment }}
+      ref: ${{ needs.fetch-baseline.outputs.sha }}
+      tf_apply: "false"
+
+  flag-drift:
+    needs: [fetch-baseline, plan]
+    if: needs.plan.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+        with:
+          role-to-assume: ${{ inputs.aws_role_arn }}
+          aws-region: ${{ inputs.aws_region }}
+          role-duration-seconds: ${{ inputs.aws_role_duration }}
+          role-session-name: ${{ github.event.repository.name }}
+
+      - name: Compute state bucket name
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          HASH=$(printf '%s-%s' "$ACCOUNT_ID" "${{ inputs.aws_region }}" | sha1sum | cut -d' ' -f1)
+          echo "S3_BUCKET=terraform-state-${HASH}" >> "$GITHUB_ENV"
+
+      - name: Build drift plan
+        run: |
+          TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          jq -n --arg sha "${{ needs.fetch-baseline.outputs.sha }}" --arg drift "$TIMESTAMP" \
+            '{sha: $sha, drift: $drift}' > /tmp/drift.plan.json
+          echo "DRIFT_TIMESTAMP=${TIMESTAMP}" >> "$GITHUB_ENV"
+
+      - name: Upload drift plan to S3
+        run: |
+          aws s3 cp /tmp/drift.plan.json "s3://${S3_BUCKET}/terraform/${{ github.event.repository.name }}/drift.plan.json"
+
+      - name: Drift summary
+        run: |
+          echo "### ${{ inputs.environment }} (drift detected)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Drift detected at \`${DRIFT_TIMESTAMP}\` against sha \`${{ needs.fetch-baseline.outputs.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  no-drift-summary:
+    needs: [fetch-baseline, plan]
+    if: needs.plan.outputs.has_changes == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: No-drift summary
+        run: |
+          echo "### ${{ inputs.environment }} (no drift)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Plan against sha \`${{ needs.fetch-baseline.outputs.sha }}\` showed no changes." >> "$GITHUB_STEP_SUMMARY"

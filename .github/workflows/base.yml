@@ -24,6 +24,13 @@ on:
       environment:
         required: true
         type: string
+      ref:
+        default: ""
+        type: string
+    outputs:
+      has_changes:
+        description: "true if the plan contains changes, false if no changes"
+        value: ${{ jobs.terraform.outputs.has_changes }}
 
 jobs:
   terraform:
@@ -34,8 +41,12 @@ jobs:
     permissions:
       id-token: write
       contents: write
+    outputs:
+      has_changes: ${{ steps.plan-summary.outputs.has_changes }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.ref }}
 
       - uses: hashicorp/setup-terraform@5e8dbf3c6d9deaf4193ca7a8fb23f2ac83bb6c85 # v4.0.0
         with:
@@ -70,10 +81,16 @@ jobs:
         run: tf show -no-color /tmp/${{ inputs.environment }}.tfplan > /tmp/${{ inputs.environment }}.plan.txt
 
       - name: Plan summary
+        id: plan-summary
         run: |
           line=$(grep -E 'No changes\.|Plan: ' /tmp/${{ inputs.environment }}.plan.txt)
           echo "### ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
           echo "$line" >> $GITHUB_STEP_SUMMARY
+          if grep -q 'No changes\.' /tmp/${{ inputs.environment }}.plan.txt; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Upload plan
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
