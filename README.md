@@ -22,7 +22,7 @@ the right `-var-file` flags every time is tedious and error-prone. `tf` does it 
 
 - `TfRunner` — orchestrates the tool with four execution paths:
   - **Simple subcommands** (fmt, validate, etc.) pass through directly, no AWS session needed
-  - **init** injects `-backend-config` flags for bucket, key, region, lock table, and encrypt
+  - **init** injects `-backend-config` flags for bucket, key, region, locking, and encrypt
   - **show, output, state** set `TF_DATA_DIR` so terraform finds the correct providers, then
     pass through
   - **plan, apply, etc.** auto-run `terraform init` with backend config, then inject
@@ -135,6 +135,13 @@ be set in the environment or via `tf.env`:
 ```
 TF_STATE_FILE_NAME=environment-reporter.tfstate
 ```
+
+### State locking
+
+By default, `tf` uses Terraform's native S3 lockfile (`use_lockfile=true`), which writes a `.tflock`
+object alongside the state file. To fall back to DynamoDB-based locking, set `TF_STATE_LOCK=dynamodb`
+in the environment or via `tf.env`. Valid values are `s3` (default) and `dynamodb`. The DynamoDB
+table name, when used, matches the state bucket name.
 
 ## Development
 

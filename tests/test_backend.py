@@ -2,6 +2,7 @@
 
 import hashlib
 from unittest.mock import patch
+import pytest
 import tf
 
 
@@ -94,6 +95,32 @@ class TestTfBackendDataDir:
                                   repo_name="my-repo")
 
         assert backend_a.data_dir != backend_b.data_dir
+
+
+class TestTfBackendInitCommand:
+    def test_default_lock_backend_emits_use_lockfile(self):
+        backend = tf.TfBackend(account_id="123456789012", region="eu-west-1",
+                               repo_name="my-repo")
+
+        command = backend.init_command()
+
+        assert "-backend-config=use_lockfile=true" in command
+        assert not any(arg.startswith("-backend-config=dynamodb_table=")
+                       for arg in command)
+
+    def test_dynamodb_lock_backend_emits_dynamodb_table(self):
+        backend = tf.TfBackend(account_id="123456789012", region="eu-west-1",
+                               repo_name="my-repo", lock_backend="dynamodb")
+
+        command = backend.init_command()
+
+        assert f"-backend-config=dynamodb_table={backend.lock_table}" in command
+        assert "-backend-config=use_lockfile=true" not in command
+
+    def test_invalid_lock_backend_raises(self):
+        with pytest.raises(tf.TfError, match="Invalid TF_STATE_LOCK"):
+            tf.TfBackend(account_id="123456789012", region="eu-west-1",
+                         repo_name="my-repo", lock_backend="memcached")
 
 
 class TestTfBackendRepoName:

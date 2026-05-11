@@ -95,12 +95,21 @@ class TfVarsFiles:
 
 
 class TfBackend:
+    VALID_LOCK_BACKENDS = frozenset({"s3", "dynamodb"})
+
     def __init__(self, account_id: str, region: str, repo_name: str,
-                 state_file_name: str = "main.tfstate"):
+                 state_file_name: str = "main.tfstate",
+                 lock_backend: str = "s3"):
+        if lock_backend not in self.VALID_LOCK_BACKENDS:
+            raise TfError(
+                f"Invalid TF_STATE_LOCK={lock_backend!r}. "
+                f"Expected one of: {sorted(self.VALID_LOCK_BACKENDS)}."
+            )
         self._account_id = account_id
         self._region = region
         self._repo_name = repo_name
         self._state_file_name = state_file_name
+        self._lock_backend = lock_backend
 
     @property
     def bucket(self) -> str:
@@ -124,9 +133,12 @@ class TfBackend:
             f"-backend-config=key={self.state_path}",
             f"-backend-config=bucket={self.bucket}",
             f"-backend-config=region={self._region}",
-            f"-backend-config=dynamodb_table={self.lock_table}",
             "-backend-config=encrypt=true",
         ]
+        if self._lock_backend == "s3":
+            command.append("-backend-config=use_lockfile=true")
+        else:
+            command.append(f"-backend-config=dynamodb_table={self.lock_table}")
         if extra_args:
             command.extend(extra_args)
         return command
@@ -201,9 +213,10 @@ class TfRunner:
             raise TfError("Cannot determine AWS account ID for backend config.")
         repo_name = TfBackend._get_repo_name()
         state_file_name = os.environ.get("TF_STATE_FILE_NAME", "main.tfstate")
+        lock_backend = os.environ.get("TF_STATE_LOCK", "s3")
         return TfBackend(
             account_id=account_id, region=context.region, repo_name=repo_name,
-            state_file_name=state_file_name,
+            state_file_name=state_file_name, lock_backend=lock_backend,
         )
 
     def _run_init(self, backend: TfBackend) -> None:

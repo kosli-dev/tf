@@ -65,7 +65,9 @@ class TestTfRunnerInit:
         assert f"-backend-config=key={backend.state_path}" in command
         assert f"-backend-config=bucket={backend.bucket}" in command
         assert "-backend-config=region=eu-west-1" in command
-        assert f"-backend-config=dynamodb_table={backend.lock_table}" in command
+        assert "-backend-config=use_lockfile=true" in command
+        assert not any(arg.startswith("-backend-config=dynamodb_table=")
+                       for arg in command)
         assert "-backend-config=encrypt=true" in command
 
     def test_init_preserves_extra_args(self, monkeypatch):
@@ -106,6 +108,47 @@ class TestTfRunnerInit:
 
         command = mock_execvp.call_args[0][1]
         assert "-backend-config=key=terraform/my-repo/main.tfstate" in command
+
+    def test_init_defaults_to_s3_lockfile_when_env_var_unset(self, monkeypatch):
+        monkeypatch.setenv("AWS_VAULT", "staging")
+        monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-west-1")
+        monkeypatch.delenv("TF_STATE_LOCK", raising=False)
+
+        with patch("tf.TfBackend._get_repo_name", return_value="my-repo"), \
+             patch("tf.TfVarsFiles._get_account_id", return_value="123456789012"), \
+             patch("tf.os.execvp") as mock_execvp:
+            tf.TfRunner(["init"]).call()
+
+        command = mock_execvp.call_args[0][1]
+        assert "-backend-config=use_lockfile=true" in command
+        assert not any(arg.startswith("-backend-config=dynamodb_table=")
+                       for arg in command)
+
+    def test_init_uses_dynamodb_when_tf_state_lock_dynamodb(self, monkeypatch):
+        monkeypatch.setenv("AWS_VAULT", "staging")
+        monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-west-1")
+        monkeypatch.setenv("TF_STATE_LOCK", "dynamodb")
+
+        backend = _mock_backend()
+        with patch("tf.TfBackend._get_repo_name", return_value="my-repo"), \
+             patch("tf.TfVarsFiles._get_account_id", return_value="123456789012"), \
+             patch("tf.os.execvp") as mock_execvp:
+            tf.TfRunner(["init"]).call()
+
+        command = mock_execvp.call_args[0][1]
+        assert f"-backend-config=dynamodb_table={backend.lock_table}" in command
+        assert "-backend-config=use_lockfile=true" not in command
+
+    def test_init_invalid_tf_state_lock_raises(self, monkeypatch):
+        monkeypatch.setenv("AWS_VAULT", "staging")
+        monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-west-1")
+        monkeypatch.setenv("TF_STATE_LOCK", "memcached")
+
+        with patch("tf.TfBackend._get_repo_name", return_value="my-repo"), \
+             patch("tf.TfVarsFiles._get_account_id", return_value="123456789012"), \
+             patch("tf.os.execvp"):
+            with pytest.raises(tf.TfError, match="Invalid TF_STATE_LOCK"):
+                tf.TfRunner(["init"]).call()
 
 
 class TestTfRunnerAutoInit:
