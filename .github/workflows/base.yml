@@ -37,10 +37,6 @@ on:
       kosli_org:
         default: "kosli"
         type: string
-      kosli_flow:
-        description: "Kosli flow name. Required when kosli_template_file is set."
-        default: ""
-        type: string
       kosli_cli_version:
         default: "2.17.4"
         type: string
@@ -59,6 +55,11 @@ jobs:
     env:
       AWS_DEFAULT_REGION: ${{ inputs.aws_region }}
       environment: ${{ inputs.environment }}
+      KOSLI_ORG: ${{ inputs.kosli_org }}
+      KOSLI_HOST: ${{ inputs.kosli_host }}
+      KOSLI_API_TOKEN: ${{ secrets.kosli_api_token }}
+      KOSLI_FLOW: terraform-${{ inputs.environment }}-${{ inputs.tf_apply == 'true' && 'apply' || 'plan' }}
+      KOSLI_TRAIL: ${{ github.event.pull_request.head.sha || github.sha }}
     permissions:
       id-token: write
       contents: write
@@ -128,37 +129,15 @@ jobs:
 
       - name: Kosli create flow
         if: inputs.kosli_template_file != ''
-        env:
-          KOSLI_ORG: ${{ inputs.kosli_org }}
-          KOSLI_HOST: ${{ inputs.kosli_host }}
-          KOSLI_API_TOKEN: ${{ secrets.kosli_api_token }}
-        run: |
-          kosli create flow "${{ inputs.kosli_flow }}" \
-            --template-file "${{ inputs.kosli_template_file }}"
+        run: kosli create flow "$KOSLI_FLOW" --template-file "${{ inputs.kosli_template_file }}"
 
       - name: Kosli begin trail
         if: inputs.kosli_template_file != ''
-        env:
-          KOSLI_ORG: ${{ inputs.kosli_org }}
-          KOSLI_HOST: ${{ inputs.kosli_host }}
-          KOSLI_API_TOKEN: ${{ secrets.kosli_api_token }}
-        run: |
-          kosli begin trail "${{ github.event.pull_request.head.sha || github.sha }}" \
-            --flow "${{ inputs.kosli_flow }}" \
-            --template-file "${{ inputs.kosli_template_file }}"
+        run: kosli begin trail "$KOSLI_TRAIL" --template-file "${{ inputs.kosli_template_file }}"
 
       - name: Kosli attest plan
         if: inputs.kosli_template_file != ''
-        env:
-          KOSLI_ORG: ${{ inputs.kosli_org }}
-          KOSLI_HOST: ${{ inputs.kosli_host }}
-          KOSLI_API_TOKEN: ${{ secrets.kosli_api_token }}
-        run: |
-          kosli attest generic \
-            --name terraform-plan \
-            --flow "${{ inputs.kosli_flow }}" \
-            --trail "${{ github.event.pull_request.head.sha || github.sha }}" \
-            --attachments /tmp/${{ inputs.environment }}.plan.txt
+        run: kosli attest generic --name terraform-plan --attachments /tmp/${{ inputs.environment }}.plan.txt
 
       - name: Apply
         if: inputs.tf_apply == 'true'
@@ -182,13 +161,4 @@ jobs:
 
       - name: Kosli attest apply
         if: inputs.tf_apply == 'true' && inputs.kosli_template_file != ''
-        env:
-          KOSLI_ORG: ${{ inputs.kosli_org }}
-          KOSLI_HOST: ${{ inputs.kosli_host }}
-          KOSLI_API_TOKEN: ${{ secrets.kosli_api_token }}
-        run: |
-          kosli attest generic \
-            --name terraform-apply \
-            --flow "${{ inputs.kosli_flow }}" \
-            --trail "${{ github.event.pull_request.head.sha || github.sha }}" \
-            --attachments /tmp/${{ inputs.environment }}.apply.txt
+        run: kosli attest generic --name terraform-apply --attachments /tmp/${{ inputs.environment }}.apply.txt

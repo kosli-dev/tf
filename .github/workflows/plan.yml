@@ -31,10 +31,6 @@ on:
       kosli_org:
         default: "kosli"
         type: string
-      kosli_flow:
-        description: "Kosli flow name. Required when kosli_template_file is set."
-        default: ""
-        type: string
       kosli_cli_version:
         default: "2.17.4"
         type: string
@@ -60,7 +56,6 @@ jobs:
       kosli_template_file: ${{ inputs.kosli_template_file }}
       kosli_host: ${{ inputs.kosli_host }}
       kosli_org: ${{ inputs.kosli_org }}
-      kosli_flow: ${{ inputs.kosli_flow }}
       kosli_cli_version: ${{ inputs.kosli_cli_version }}
     secrets:
       kosli_api_token: ${{ secrets.kosli_api_token }}
