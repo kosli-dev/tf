@@ -67,11 +67,15 @@ jobs:
         run: |
           SHA=$(jq -r '.sha' /tmp/drift.plan.json)
           DRIFT=$(jq -r '.drift | tostring' /tmp/drift.plan.json)
-          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
-          echo "drift=${DRIFT}" >> "$GITHUB_OUTPUT"
-          echo "### ${{ inputs.environment }} (baseline)" >> "$GITHUB_STEP_SUMMARY"
-          echo "sha: \`${SHA}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "drift: \`${DRIFT}\`" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "sha=${SHA}"
+            echo "drift=${DRIFT}"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### ${{ inputs.environment }} (baseline)"
+            echo "sha: \`${SHA}\`"
+            echo "drift: \`${DRIFT}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   plan:
     needs: fetch-baseline
@@ -88,7 +92,7 @@ jobs:
       tf_version: ${{ inputs.tf_version }}
       environment: ${{ inputs.environment }}
       ref: ${{ needs.fetch-baseline.outputs.sha }}
-      tf_apply: "false"
+      tf_apply: false
 
   flag-drift:
     needs: [fetch-baseline, plan]

@@ -19,8 +19,8 @@ on:
         default: "1.14.6"
         type: string
       tf_apply:
-        default: "false"
-        type: string
+        default: false
+        type: boolean
       environment:
         required: true
         type: string
@@ -84,7 +84,7 @@ jobs:
         with:
           repository: kosli-dev/tf
           path: .tf-cli
-      - run: echo "$GITHUB_WORKSPACE/.tf-cli/bin" >> $GITHUB_PATH
+      - run: echo "$GITHUB_WORKSPACE/.tf-cli/bin" >> "$GITHUB_PATH"
 
       - name: Check formatting
         working-directory: ${{ inputs.working_directory }}
@@ -116,8 +116,10 @@ jobs:
         id: plan-summary
         run: |
           line=$(grep -E 'No changes\.|Plan: ' /tmp/${{ inputs.environment }}.plan.txt)
-          echo "### ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "$line" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "### ${{ inputs.environment }}"
+            echo "$line"
+          } >> "$GITHUB_STEP_SUMMARY"
           if grep -q 'No changes\.' /tmp/${{ inputs.environment }}.plan.txt; then
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
           else
@@ -144,19 +146,21 @@ jobs:
         run: kosli attest generic --name terraform-plan --attachments /tmp/${{ inputs.environment }}.plan.txt
 
       - name: Apply
-        if: inputs.tf_apply == 'true'
+        if: inputs.tf_apply
         working-directory: ${{ inputs.working_directory }}
         run: tf apply 2>&1 | tee /tmp/${{ inputs.environment }}.apply.txt
 
       - name: Apply summary
-        if: inputs.tf_apply == 'true'
+        if: inputs.tf_apply
         run: |
           line=$(grep -E 'Apply complete!' /tmp/${{ inputs.environment }}.apply.txt)
-          echo "### ${{ inputs.environment }} (apply)" >> $GITHUB_STEP_SUMMARY
-          echo "$line" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "### ${{ inputs.environment }} (apply)"
+            echo "$line"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload apply log
-        if: inputs.tf_apply == 'true'
+        if: inputs.tf_apply
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: tfapply-${{ inputs.environment }}
@@ -164,5 +168,5 @@ jobs:
           archive: false
 
       - name: Kosli attest apply
-        if: inputs.tf_apply == 'true' && inputs.kosli_template_file != ''
+        if: inputs.tf_apply && inputs.kosli_template_file != ''
         run: kosli attest generic --name terraform-apply --attachments /tmp/${{ inputs.environment }}.apply.txt
