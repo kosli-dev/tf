@@ -27,7 +27,7 @@ jobs:
     permissions:
       id-token: write
       contents: write
-    uses: kosli-dev/tf/.github/workflows/base.yml@main
+    uses: ./.github/workflows/base.yml
     with:
       aws_region: ${{ inputs.aws_region }}
       aws_role_arn: ${{ inputs.aws_role_arn }}

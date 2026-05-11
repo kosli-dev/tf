@@ -78,8 +78,8 @@ jobs:
     if: needs.fetch-baseline.outputs.drift == 'false'
     permissions:
       id-token: write
-      contents: read
-    uses: kosli-dev/tf/.github/workflows/base.yml@main
+      contents: write
+    uses: ./.github/workflows/base.yml
     with:
       aws_region: ${{ inputs.aws_region }}
       aws_role_arn: ${{ inputs.aws_role_arn }}
