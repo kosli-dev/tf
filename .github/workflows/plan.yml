@@ -21,6 +21,27 @@ on:
       environment:
         required: true
         type: string
+      kosli_template_file:
+        description: "Path (in caller repo) to the Kosli trail template. Empty disables all Kosli steps."
+        default: ""
+        type: string
+      kosli_host:
+        default: "https://app.kosli.com"
+        type: string
+      kosli_org:
+        default: "kosli"
+        type: string
+      kosli_flow:
+        description: "Kosli flow name. Required when kosli_template_file is set."
+        default: ""
+        type: string
+      kosli_cli_version:
+        default: "2.17.4"
+        type: string
+    secrets:
+      kosli_api_token:
+        description: "Kosli API token. Required when kosli_template_file is set."
+        required: false
 
 jobs:
   plan:
@@ -36,3 +57,10 @@ jobs:
       tf_version: ${{ inputs.tf_version }}
       environment: ${{ inputs.environment }}
       tf_apply: "false"
+      kosli_template_file: ${{ inputs.kosli_template_file }}
+      kosli_host: ${{ inputs.kosli_host }}
+      kosli_org: ${{ inputs.kosli_org }}
+      kosli_flow: ${{ inputs.kosli_flow }}
+      kosli_cli_version: ${{ inputs.kosli_cli_version }}
+    secrets:
+      kosli_api_token: ${{ secrets.kosli_api_token }}

@@ -21,6 +21,31 @@ on:
       environment:
         required: true
         type: string
+      tf_state_file_name:
+        description: "Name of the state file in S3 under terraform/<repo>/."
+        default: "main.tfstate"
+        type: string
+      kosli_template_file:
+        description: "Path (in caller repo) to the Kosli trail template. Empty disables all Kosli steps."
+        default: ""
+        type: string
+      kosli_host:
+        default: "https://app.kosli.com"
+        type: string
+      kosli_org:
+        default: "kosli"
+        type: string
+      kosli_flow:
+        description: "Kosli flow name. Required when kosli_template_file is set."
+        default: ""
+        type: string
+      kosli_cli_version:
+        default: "2.17.4"
+        type: string
+    secrets:
+      kosli_api_token:
+        description: "Kosli API token. Required when kosli_template_file is set."
+        required: false
 
 jobs:
   apply:
@@ -36,6 +61,13 @@ jobs:
       tf_version: ${{ inputs.tf_version }}
       environment: ${{ inputs.environment }}
       tf_apply: "true"
+      kosli_template_file: ${{ inputs.kosli_template_file }}
+      kosli_host: ${{ inputs.kosli_host }}
+      kosli_org: ${{ inputs.kosli_org }}
+      kosli_flow: ${{ inputs.kosli_flow }}
+      kosli_cli_version: ${{ inputs.kosli_cli_version }}
+    secrets:
+      kosli_api_token: ${{ secrets.kosli_api_token }}
 
   reset-drift-detection:
     needs: apply
@@ -72,3 +104,42 @@ jobs:
           name: drift-${{ inputs.environment }}
           path: /tmp/drift.plan.json
           archive: false
+
+      - name: Setup Kosli CLI
+        if: inputs.kosli_template_file != ''
+        uses: kosli-dev/setup-cli-action@d4e28a69867117f50417f53eda3ee23867150899 # v3
+        with:
+          version: ${{ inputs.kosli_cli_version }}
+
+      - name: Download state file from S3
+        if: inputs.kosli_template_file != ''
+        run: |
+          aws s3 cp \
+            "s3://${S3_BUCKET}/terraform/${{ github.event.repository.name }}/${{ inputs.tf_state_file_name }}" \
+            "/tmp/${{ inputs.tf_state_file_name }}"
+
+      - name: Kosli attest state file
+        if: inputs.kosli_template_file != ''
+        env:
+          KOSLI_ORG: ${{ inputs.kosli_org }}
+          KOSLI_HOST: ${{ inputs.kosli_host }}
+          KOSLI_API_TOKEN: ${{ secrets.kosli_api_token }}
+        run: |
+          kosli attest artifact "/tmp/${{ inputs.tf_state_file_name }}" \
+            --artifact-type file \
+            --name terraform-state \
+            --flow "${{ inputs.kosli_flow }}" \
+            --trail "${{ github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Kosli attest drift plan
+        if: inputs.kosli_template_file != ''
+        env:
+          KOSLI_ORG: ${{ inputs.kosli_org }}
+          KOSLI_HOST: ${{ inputs.kosli_host }}
+          KOSLI_API_TOKEN: ${{ secrets.kosli_api_token }}
+        run: |
+          kosli attest artifact /tmp/drift.plan.json \
+            --artifact-type file \
+            --name drift-plan \
+            --flow "${{ inputs.kosli_flow }}" \
+            --trail "${{ github.event.pull_request.head.sha || github.sha }}"
