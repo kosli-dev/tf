@@ -36,3 +36,39 @@ jobs:
       tf_version: ${{ inputs.tf_version }}
       environment: ${{ inputs.environment }}
       tf_apply: "true"
+
+  reset-drift-detection:
+    needs: apply
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+        with:
+          role-to-assume: ${{ inputs.aws_role_arn }}
+          aws-region: ${{ inputs.aws_region }}
+          role-duration-seconds: ${{ inputs.aws_role_duration }}
+          role-session-name: ${{ github.event.repository.name }}
+
+      - name: Compute state bucket name
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          HASH=$(printf '%s-%s' "$ACCOUNT_ID" "${{ inputs.aws_region }}" | sha1sum | cut -d' ' -f1)
+          echo "S3_BUCKET=terraform-state-${HASH}" >> "$GITHUB_ENV"
+
+      - name: Create drift plan
+        run: |
+          jq -n --arg sha "${{ github.event.pull_request.head.sha || github.sha }}" '{sha: $sha, drift: false}' > /tmp/drift.plan.json
+
+      - name: Upload drift plan to S3
+        run: |
+          aws s3 cp /tmp/drift.plan.json "s3://${S3_BUCKET}/terraform/${{ github.event.repository.name }}/drift.plan.json"
+
+      - name: Upload drift plan artifact
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: drift-${{ inputs.environment }}
+          path: /tmp/drift.plan.json
+          archive: false
