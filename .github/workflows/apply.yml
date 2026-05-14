@@ -60,7 +60,7 @@ jobs:
       kosli_template_file: ${{ inputs.kosli_template_file }}
       kosli_host: ${{ inputs.kosli_host }}
       kosli_org: ${{ inputs.kosli_org }}
-      kosli_flow: terraform-${{ inputs.environment }}-apply
+      kosli_flow: terraform-apply-${{ inputs.environment }}
       kosli_cli_version: ${{ inputs.kosli_cli_version }}
     secrets:
       kosli_api_token: ${{ secrets.kosli_api_token }}
@@ -75,7 +75,7 @@ jobs:
       KOSLI_ORG: ${{ inputs.kosli_org }}
       KOSLI_HOST: ${{ inputs.kosli_host }}
       KOSLI_API_TOKEN: ${{ secrets.kosli_api_token }}
-      KOSLI_FLOW: terraform-${{ inputs.environment }}-apply
+      KOSLI_FLOW: terraform-apply-${{ inputs.environment }}
       KOSLI_TRAIL: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Configure AWS credentials
