@@ -87,7 +87,7 @@ To apply instead of plan, use `apply.yml`:
 
 ### Workflow inputs
 
-Both `plan.yml` and `apply.yml` accept the same inputs:
+Both `plan.yml` and `apply.yml` accept the same core inputs:
 
 | Input | Required | Default | Description |
 |---|---|---|---|
@@ -97,6 +97,24 @@ Both `plan.yml` and `apply.yml` accept the same inputs:
 | `aws_role_duration` | no | `1200` | Role session duration in seconds |
 | `working_directory` | no | `./` | Directory containing Terraform config |
 | `tf_version` | no | `1.14.6` | Terraform version to install |
+
+Plus, for opting into Kosli attestation (see [Kosli attestation](#kosli-attestation) below):
+
+| Input | Required | Default | Description |
+|---|---|---|---|
+| `kosli_template_file` | no | `""` | Path to Kosli trail template; empty disables Kosli. |
+| `kosli_host` | no | `https://app.kosli.com` | Kosli endpoint. |
+| `kosli_org` | no | `kosli` | Kosli organisation name. |
+| `kosli_cli_version` | no | `2.17.4` | Kosli CLI version to install. |
+
+`apply.yml` also accepts `tf_state_file_name` (default `main.tfstate`) which names the state file
+under `terraform/<repo>/` in S3. This is used by `apply.yml`'s drift-plan housekeeping; see below.
+
+### Secrets
+
+| Secret | Required | Description |
+|---|---|---|
+| `kosli_api_token` | if `kosli_template_file` is set | Kosli API token for the attest steps. |
 
 ### What it does
 
@@ -112,6 +130,71 @@ Both `plan.yml` and `apply.yml` accept the same inputs:
 **Apply** (`apply.yml`):
 1. Steps 1–4 as above
 2. Runs `tf apply` (auto-init, auto-selects tfvars, auto-approves)
+3. Writes `drift.plan.json` (containing `{sha, drift: false}`) alongside the state file in S3,
+   so the [drift-detection job][drift-doc] has a known-good baseline to compare against on its
+   next run.
+
+### Kosli attestation
+
+Both workflows can optionally attest each Terraform run to Kosli.  This is opt-in: provide a
+`kosli_template_file` input and pass the `kosli_api_token` secret, and the workflows will:
+
+* create the Kosli flow `terraform-<environment>-plan` (or `-apply`) from your template,
+* begin a trail named after the commit SHA being acted on,
+* attest the plan output (and, for apply, the apply log) as generic attestations, and
+* in `apply.yml`, additionally attest the **state file** and the **drift plan** as artifacts so
+  that any later out-of-band change to either file is detected as drift by the downstream
+  [drift-detection job][drift-doc].
+
+The trail template needs to declare every attestation/artifact name the workflow emits:
+
+```yaml
+# kosli-apply-template.yml
+version: 1
+trail:
+  attestations:
+    - name: terraform-plan
+      type: generic
+    - name: terraform-apply
+      type: generic
+  artifacts:
+    - name: terraform-state
+    - name: drift-plan
+```
+
+(The plan workflow only needs `terraform-plan`, so a separate slimmer template can be used for
+`plan.yml` if desired.)
+
+Example caller workflow with Kosli enabled:
+
+```yaml
+jobs:
+  apply:
+    needs: [all-environments]
+    permissions:
+      id-token: write
+      contents: write
+    uses: kosli-dev/tf/.github/workflows/apply.yml@main
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.all-environments.outputs.json) }}
+    name: ${{ matrix.name }}
+    with:
+      aws_region: ${{ matrix.aws_region }}
+      aws_role_arn: "arn:aws:iam::${{ matrix.aws_account_id }}:role/my-role"
+      environment: ${{ matrix.environment }}
+      tf_version: v1.14.6
+      kosli_template_file: kosli-apply-template.yml
+    secrets:
+      kosli_api_token: ${{ secrets.KOSLI_API_TOKEN }}
+```
+
+The `KOSLI_API_TOKEN` secret should be configured at the repository or organization level in
+GitHub.  If `kosli_template_file` is left empty, every Kosli step is skipped and the token is not
+required.
+
+[drift-doc]: https://github.com/kosli-dev/knowledge-base/blob/main/drift-detection.md
 
 ## Configuration
 
