@@ -19,11 +19,39 @@ on:
         default: "1.14.6"
         type: string
       tf_apply:
-        default: "false"
-        type: string
+        default: false
+        type: boolean
       environment:
         required: true
         type: string
+      ref:
+        default: ""
+        type: string
+      kosli_template_file:
+        description: "Path (in caller repo) to the Kosli trail template. Empty disables all Kosli steps."
+        default: ""
+        type: string
+      kosli_host:
+        default: "https://app.kosli.com"
+        type: string
+      kosli_org:
+        default: "kosli"
+        type: string
+      kosli_flow:
+        description: "Kosli flow name. Required when kosli_template_file is set."
+        default: ""
+        type: string
+      kosli_cli_version:
+        default: "2.17.4"
+        type: string
+    secrets:
+      kosli_api_token:
+        description: "Kosli API token. Required when kosli_template_file is set."
+        required: false
+    outputs:
+      has_changes:
+        description: "true if the plan contains changes, false if no changes"
+        value: ${{ jobs.terraform.outputs.has_changes }}
 
 jobs:
   terraform:
@@ -31,11 +59,20 @@ jobs:
     env:
       AWS_DEFAULT_REGION: ${{ inputs.aws_region }}
       environment: ${{ inputs.environment }}
+      KOSLI_ORG: ${{ inputs.kosli_org }}
+      KOSLI_HOST: ${{ inputs.kosli_host }}
+      KOSLI_API_TOKEN: ${{ secrets.kosli_api_token }}
+      KOSLI_FLOW: ${{ inputs.kosli_flow }}
+      KOSLI_TRAIL: ${{ github.event.pull_request.head.sha || github.sha }}
     permissions:
       id-token: write
       contents: write
+    outputs:
+      has_changes: ${{ steps.plan-summary.outputs.has_changes }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.ref }}
 
       - uses: hashicorp/setup-terraform@5e8dbf3c6d9deaf4193ca7a8fb23f2ac83bb6c85 # v4.0.0
         with:
@@ -47,7 +84,7 @@ jobs:
         with:
           repository: kosli-dev/tf
           path: .tf-cli
-      - run: echo "$GITHUB_WORKSPACE/.tf-cli/bin" >> $GITHUB_PATH
+      - run: echo "$GITHUB_WORKSPACE/.tf-cli/bin" >> "$GITHUB_PATH"
 
       - name: Check formatting
         working-directory: ${{ inputs.working_directory }}
@@ -61,6 +98,12 @@ jobs:
           role-duration-seconds: ${{ inputs.aws_role_duration }}
           role-session-name: ${{ github.event.repository.name }}
 
+      - name: Setup Kosli CLI
+        if: inputs.kosli_template_file != ''
+        uses: kosli-dev/setup-cli-action@d4e28a69867117f50417f53eda3ee23867150899 # v3
+        with:
+          version: ${{ inputs.kosli_cli_version }}
+
       - name: Plan
         working-directory: ${{ inputs.working_directory }}
         run: tf plan -no-color
@@ -70,10 +113,18 @@ jobs:
         run: tf show -no-color /tmp/${{ inputs.environment }}.tfplan > /tmp/${{ inputs.environment }}.plan.txt
 
       - name: Plan summary
+        id: plan-summary
         run: |
           line=$(grep -E 'No changes\.|Plan: ' /tmp/${{ inputs.environment }}.plan.txt)
-          echo "### ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "$line" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "### ${{ inputs.environment }}"
+            echo "$line"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if grep -q 'No changes\.' /tmp/${{ inputs.environment }}.plan.txt; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Upload plan
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
@@ -82,22 +133,40 @@ jobs:
           path: /tmp/${{ inputs.environment }}.plan.txt
           archive: false
 
+      - name: Kosli create flow
+        if: inputs.kosli_template_file != ''
+        run: kosli create flow "$KOSLI_FLOW" --template-file "${{ inputs.kosli_template_file }}"
+
+      - name: Kosli begin trail
+        if: inputs.kosli_template_file != ''
+        run: kosli begin trail "$KOSLI_TRAIL" --template-file "${{ inputs.kosli_template_file }}"
+
+      - name: Kosli attest plan
+        if: inputs.kosli_template_file != ''
+        run: kosli attest generic --name terraform-plan --attachments /tmp/${{ inputs.environment }}.plan.txt
+
       - name: Apply
-        if: inputs.tf_apply == 'true'
+        if: inputs.tf_apply
         working-directory: ${{ inputs.working_directory }}
         run: tf apply 2>&1 | tee /tmp/${{ inputs.environment }}.apply.txt
 
       - name: Apply summary
-        if: inputs.tf_apply == 'true'
+        if: inputs.tf_apply
         run: |
           line=$(grep -E 'Apply complete!' /tmp/${{ inputs.environment }}.apply.txt)
-          echo "### ${{ inputs.environment }} (apply)" >> $GITHUB_STEP_SUMMARY
-          echo "$line" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "### ${{ inputs.environment }} (apply)"
+            echo "$line"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload apply log
-        if: inputs.tf_apply == 'true'
+        if: inputs.tf_apply
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: tfapply-${{ inputs.environment }}
           path: /tmp/${{ inputs.environment }}.apply.txt
           archive: false
+
+      - name: Kosli attest apply
+        if: inputs.tf_apply && inputs.kosli_template_file != ''
+        run: kosli attest generic --name terraform-apply --attachments /tmp/${{ inputs.environment }}.apply.txt
