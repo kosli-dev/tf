@@ -56,7 +56,7 @@ jobs:
       kosli_template_file: ${{ inputs.kosli_template_file }}
       kosli_host: ${{ inputs.kosli_host }}
       kosli_org: ${{ inputs.kosli_org }}
-      kosli_flow: terraform-plan-${{ inputs.environment }}
+      kosli_flow: terraform-plan-${{ inputs.environment }}-${{ github.event.repository.name }}
       kosli_cli_version: ${{ inputs.kosli_cli_version }}
     secrets:
       kosli_api_token: ${{ secrets.kosli_api_token }}

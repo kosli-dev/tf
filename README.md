@@ -139,7 +139,7 @@ under `terraform/<repo>/` in S3. This is used by `apply.yml`'s drift-plan housek
 Both workflows can optionally attest each Terraform run to Kosli.  This is opt-in: provide a
 `kosli_template_file` input and pass the `kosli_api_token` secret, and the workflows will:
 
-* create the Kosli flow `terraform-<environment>-plan` (or `-apply`) from your template,
+* create the Kosli flow `terraform-plan-<environment>-<repo>` (or `terraform-apply-<environment>-<repo>`) from your template,
 * begin a trail named after the commit SHA being acted on,
 * attest the plan output (and, for apply, the apply log) as generic attestations, and
 * in `apply.yml`, additionally attest the **state file** and the **drift plan** as artifacts so
