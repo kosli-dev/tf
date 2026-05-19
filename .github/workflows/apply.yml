@@ -42,6 +42,9 @@ on:
       kosli_api_token:
         description: "Kosli API token. Required when kosli_template_file is set."
         required: false
+      github_token:
+        description: "GitHub token used by `kosli attest pr github` to look up pull requests. Required when kosli_template_file is set."
+        required: false
 
 jobs:
   apply:
@@ -129,3 +132,10 @@ jobs:
       - name: Kosli attest drift plan
         if: inputs.kosli_template_file != ''
         run: kosli attest artifact /tmp/drift.plan.json --artifact-type file --name drift-plan
+
+      - name: Kosli attest pull request
+        if: inputs.kosli_template_file != ''
+        run: |
+          kosli attest pr github \
+            --name pull-request \
+            --github-token ${{ secrets.github_token }}
