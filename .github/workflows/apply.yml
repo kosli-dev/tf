@@ -42,6 +42,13 @@ on:
       kosli_api_token:
         description: "Kosli API token. Required when kosli_template_file is set."
         required: false
+    outputs:
+      kosli_flow:
+        description: "Name of the Kosli flow used by this workflow."
+        value: ${{ jobs.reset-drift-detection.outputs.kosli_flow }}
+      kosli_trail:
+        description: "Name of the Kosli trail used by this workflow."
+        value: ${{ jobs.reset-drift-detection.outputs.kosli_trail }}
 
 jobs:
   apply:
@@ -77,7 +84,16 @@ jobs:
       KOSLI_API_TOKEN: ${{ secrets.kosli_api_token }}
       KOSLI_FLOW: terraform-apply-${{ inputs.environment }}-${{ github.event.repository.name }}
       KOSLI_TRAIL: ${{ github.event.pull_request.head.sha || github.sha }}
+    outputs:
+      kosli_flow: ${{ steps.kosli_names.outputs.kosli_flow }}
+      kosli_trail: ${{ steps.kosli_names.outputs.kosli_trail }}
     steps:
+      - name: Expose Kosli flow and trail
+        id: kosli_names
+        run: |
+          echo "kosli_flow=${KOSLI_FLOW}" >> "$GITHUB_OUTPUT"
+          echo "kosli_trail=${KOSLI_TRAIL}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Configure AWS credentials
