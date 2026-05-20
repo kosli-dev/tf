@@ -81,6 +81,7 @@ jobs:
       KOSLI_API_TOKEN: ${{ secrets.kosli_api_token }}
       KOSLI_FLOW: terraform-apply-${{ inputs.environment }}-${{ github.event.repository.name }}
       KOSLI_TRAIL: ${{ github.event.pull_request.head.sha || github.sha }}
+      GH_TOKEN: ${{ secrets.github_token }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -135,8 +136,8 @@ jobs:
         run: kosli attest artifact /tmp/drift.plan.json --artifact-type file --name drift-plan
 
       - name: Kosli attest pull request
-        if: inputs.kosli_template_file != '' && secrets.github_token != ''
+        if: inputs.kosli_template_file != '' && env.GH_TOKEN != ''
         run: |
           kosli attest pr github \
             --name pull-request \
-            --github-token ${{ secrets.github_token }}
+            --github-token "$GH_TOKEN"
