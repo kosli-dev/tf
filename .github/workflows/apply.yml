@@ -42,8 +42,8 @@ on:
       kosli_api_token:
         description: "Kosli API token. Required when kosli_template_file is set."
         required: false
-      github_token:
-        description: "GitHub token used by `kosli attest pr github` to look up pull requests. Optional; when omitted the pull-request attestation step is skipped."
+      kosli_github_token:
+        description: "GitHub token used by `kosli attest pr github` to look up pull requests. Optional; when omitted the pull-request attestation step is skipped. Cannot be named `github_token` because that name is reserved by `workflow_call`."
         required: false
 
 jobs:
@@ -81,7 +81,7 @@ jobs:
       KOSLI_API_TOKEN: ${{ secrets.kosli_api_token }}
       KOSLI_FLOW: terraform-apply-${{ inputs.environment }}-${{ github.event.repository.name }}
       KOSLI_TRAIL: ${{ github.event.pull_request.head.sha || github.sha }}
-      GH_TOKEN: ${{ secrets.github_token }}
+      GH_TOKEN: ${{ secrets.kosli_github_token }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
