@@ -74,6 +74,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
+      pull-requests: read
     env:
       KOSLI_ORG: ${{ inputs.kosli_org }}
       KOSLI_HOST: ${{ inputs.kosli_host }}
