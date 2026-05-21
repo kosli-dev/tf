@@ -115,6 +115,7 @@ under `terraform/<repo>/` in S3. This is used by `apply.yml`'s drift-plan housek
 | Secret | Required | Description |
 |---|---|---|
 | `kosli_api_token` | if `kosli_template_file` is set | Kosli API token for the attest steps. |
+| `kosli_github_token` | no (only `apply.yml`) | GitHub token used by `kosli attest pr github` to look up pull requests. When omitted, the pull-request attestation step is skipped. Typically passed as `${{ secrets.GITHUB_TOKEN }}` — in which case the **calling job must also declare `pull-requests: read`** in its `permissions:` block (see example below), otherwise the attestation step will fail with `Resource not accessible by integration`. |
 
 ### What it does
 
@@ -174,6 +175,7 @@ jobs:
     permissions:
       id-token: write
       contents: write
+      pull-requests: read
     uses: kosli-dev/tf/.github/workflows/apply.yml@main
     strategy:
       fail-fast: false
@@ -188,11 +190,19 @@ jobs:
       kosli_template_file: kosli-apply-template.yml
     secrets:
       kosli_api_token: ${{ secrets.KOSLI_API_TOKEN }}
+      kosli_github_token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
 The `KOSLI_API_TOKEN` secret should be configured at the repository or organization level in
 GitHub.  If `kosli_template_file` is left empty, every Kosli step is skipped and the token is not
 required.
+
+The `pull-requests: read` permission and the `kosli_github_token` secret are both needed by the
+`kosli attest pr github` step in `apply.yml`. They go together: GitHub computes the token's
+permissions in a reusable workflow as the intersection of the caller job's `permissions:` and the
+called job's `permissions:`, so both sides must grant `pull-requests: read` or the attestation
+step fails with `Resource not accessible by integration`. Omit both if you don't need
+pull-request attestation — the step is skipped when `kosli_github_token` is not passed.
 
 [drift-doc]: https://github.com/kosli-dev/knowledge-base/blob/main/drift-detection.md
 
