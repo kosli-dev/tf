@@ -27,6 +27,8 @@ the right `-var-file` flags every time is tedious and error-prone. `tf` does it 
     pass through
   - **plan, apply, etc.** auto-run `terraform init` with backend config, then inject
     `-var-file` flags
+  - **force-unlock** auto-runs `terraform init` with backend config so the lock can be located,
+    but does not inject `-var-file` flags
 - `tf plan` automatically saves a binary plan to `/tmp/<profile>.tfplan` (view with
   `tf show /tmp/<profile>.tfplan`). Skipped if the user passes their own `-out` flag.
 - `tf apply` automatically appends `-auto-approve`, since locally the plan has already been
