@@ -374,3 +374,103 @@ class TestTfRunnerPlanSavesOutput:
 
         command = mock_execvp.call_args[0][1]
         assert not any(arg.startswith("-out=") for arg in command)
+
+
+class TestTfRunnerForceUnlock:
+    def test_force_unlock_runs_init_before_command(self, monkeypatch):
+        monkeypatch.setenv("AWS_VAULT", "staging")
+        monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-west-1")
+
+        with patch("tf.TfBackend._get_repo_name", return_value="my-repo"), \
+             patch("tf.TfVarsFiles._get_account_id", return_value="123456789012"), \
+             patch("tf.subprocess.run") as mock_run, \
+             patch("tf.os.execvp"):
+            mock_run.return_value.returncode = 0
+            tf.TfRunner(["force-unlock", "abc123"]).call()
+
+        init_command = mock_run.call_args[0][0]
+        assert init_command[0] == "terraform"
+        assert init_command[1] == "init"
+        assert any(arg.startswith("-backend-config=bucket=") for arg in init_command)
+
+    def test_force_unlock_sets_tf_data_dir(self, monkeypatch):
+        monkeypatch.setenv("AWS_VAULT", "staging")
+        monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-west-1")
+        monkeypatch.delenv("TF_DATA_DIR", raising=False)
+
+        with patch("tf.TfBackend._get_repo_name", return_value="my-repo"), \
+             patch("tf.TfVarsFiles._get_account_id", return_value="123456789012"), \
+             patch("tf.subprocess.run", return_value=type("R", (), {"returncode": 0})()), \
+             patch("tf.os.execvp"):
+            tf.TfRunner(["force-unlock", "abc123"]).call()
+
+        assert os.environ["TF_DATA_DIR"] == ".terraform.123456789012-eu-west-1"
+
+    def test_force_unlock_does_not_inject_var_files(self, monkeypatch):
+        monkeypatch.setenv("AWS_VAULT", "staging")
+        monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-west-1")
+
+        with patch("tf.TfBackend._get_repo_name", return_value="my-repo"), \
+             patch("tf.TfVarsFiles._get_account_id", return_value="123456789012"), \
+             patch("tf.TfVarsFiles.find",
+                   return_value=tf.TfVarsFiles(["staging.tfvars"])), \
+             patch("tf.subprocess.run", return_value=type("R", (), {"returncode": 0})()), \
+             patch("tf.os.execvp") as mock_execvp:
+            tf.TfRunner(["force-unlock", "abc123"]).call()
+
+        command = mock_execvp.call_args[0][1]
+        assert "-var-file" not in command
+        assert "staging.tfvars" not in command
+
+    def test_force_unlock_does_not_search_for_tfvars(self, monkeypatch):
+        monkeypatch.setenv("AWS_VAULT", "staging")
+        monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-west-1")
+
+        with patch("tf.TfBackend._get_repo_name", return_value="my-repo"), \
+             patch("tf.TfVarsFiles._get_account_id", return_value="123456789012"), \
+             patch("tf.TfVarsFiles.find") as mock_find, \
+             patch("tf.subprocess.run", return_value=type("R", (), {"returncode": 0})()), \
+             patch("tf.os.execvp"):
+            tf.TfRunner(["force-unlock", "abc123"]).call()
+
+        mock_find.assert_not_called()
+
+    def test_force_unlock_does_not_add_auto_approve(self, monkeypatch):
+        monkeypatch.setenv("AWS_VAULT", "staging")
+        monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-west-1")
+
+        with patch("tf.TfBackend._get_repo_name", return_value="my-repo"), \
+             patch("tf.TfVarsFiles._get_account_id", return_value="123456789012"), \
+             patch("tf.subprocess.run", return_value=type("R", (), {"returncode": 0})()), \
+             patch("tf.os.execvp") as mock_execvp:
+            tf.TfRunner(["force-unlock", "abc123"]).call()
+
+        command = mock_execvp.call_args[0][1]
+        assert "-auto-approve" not in command
+
+    def test_force_unlock_does_not_add_out_flag(self, monkeypatch):
+        monkeypatch.setenv("AWS_VAULT", "staging")
+        monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-west-1")
+
+        with patch("tf.TfBackend._get_repo_name", return_value="my-repo"), \
+             patch("tf.TfVarsFiles._get_account_id", return_value="123456789012"), \
+             patch("tf.subprocess.run", return_value=type("R", (), {"returncode": 0})()), \
+             patch("tf.os.execvp") as mock_execvp:
+            tf.TfRunner(["force-unlock", "abc123"]).call()
+
+        command = mock_execvp.call_args[0][1]
+        assert not any(arg.startswith("-out=") for arg in command)
+
+    def test_force_unlock_passes_lock_id_through(self, monkeypatch):
+        monkeypatch.setenv("AWS_VAULT", "staging")
+        monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-west-1")
+
+        with patch("tf.TfBackend._get_repo_name", return_value="my-repo"), \
+             patch("tf.TfVarsFiles._get_account_id", return_value="123456789012"), \
+             patch("tf.subprocess.run", return_value=type("R", (), {"returncode": 0})()), \
+             patch("tf.os.execvp") as mock_execvp:
+            tf.TfRunner(["force-unlock", "abc123"]).call()
+
+        mock_execvp.assert_called_once_with(
+            "terraform", ["terraform", "force-unlock", "abc123"]
+        )

@@ -168,7 +168,9 @@ SUBCOMMANDS_ACCEPTING_VAR_FILE = frozenset({
     "plan", "apply", "destroy", "import", "refresh", "console",
 })
 
-SUBCOMMANDS_NEEDING_BACKEND = SUBCOMMANDS_ACCEPTING_VAR_FILE | {"init"}
+SUBCOMMANDS_NEEDING_BACKEND = SUBCOMMANDS_ACCEPTING_VAR_FILE | {
+    "init", "force-unlock",
+}
 
 SUBCOMMANDS_NEEDING_DATA_DIR = frozenset({"show", "output", "state"})
 
@@ -252,15 +254,21 @@ class TfRunner:
 
         self._run_init(backend)
 
-        tfvars = TfVarsFiles.find(context)
+        if self.subcommand in SUBCOMMANDS_ACCEPTING_VAR_FILE:
+            tfvars = TfVarsFiles.find(context)
 
-        if tfvars.is_using_deprecated_filenames():
-            print(
-                f"tf: using account-ID tfvars (deprecated). Rename to {context.profile}.tfvars.",
-                file=sys.stderr,
-            )
+            if tfvars.is_using_deprecated_filenames():
+                print(
+                    f"tf: using account-ID tfvars (deprecated). Rename to {context.profile}.tfvars.",
+                    file=sys.stderr,
+                )
 
-        command = self.build_command(tfvars)
+            command = self.build_command(tfvars)
+
+            if list(tfvars):
+                print(f"tf: var-files: {', '.join(tfvars)}", file=sys.stderr)
+        else:
+            command = ["terraform"] + self.args
 
         if self.subcommand == "plan" and not self._has_out_flag():
             out_path = f"/tmp/{context.profile}.tfplan"
@@ -270,9 +278,6 @@ class TfRunner:
         if self.subcommand == "apply" and not self._has_auto_approve_flag():
             command.append("-auto-approve")
             print("tf: auto-approving apply", file=sys.stderr)
-
-        if list(tfvars):
-            print(f"tf: var-files: {', '.join(tfvars)}", file=sys.stderr)
 
         os.execvp("terraform", command)
 
