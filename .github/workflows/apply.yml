@@ -98,10 +98,11 @@ jobs:
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           HASH=$(printf '%s-%s' "$ACCOUNT_ID" "${{ inputs.aws_region }}" | sha1sum | cut -d' ' -f1)
           echo "S3_BUCKET=terraform-state-${HASH}" >> "$GITHUB_ENV"
+          echo "AWS_ACCOUNT_ID=${ACCOUNT_ID}" >> "$GITHUB_ENV"
 
       - name: Create drift plan
         run: |
-          jq -n --arg sha "${{ github.event.pull_request.head.sha || github.sha }}" '{sha: $sha, drift: false}' > /tmp/drift.plan.json
+          jq -n --arg sha "${{ github.event.pull_request.head.sha || github.sha }}" --arg account "$AWS_ACCOUNT_ID" '{sha: $sha, drift: false, aws_account_id: $account}' > /tmp/drift.plan.json
 
       - name: Upload drift plan to S3
         run: |
