@@ -99,6 +99,7 @@ Both `plan.yml` and `apply.yml` accept the same core inputs:
 | `aws_role_duration` | no | `1200` | Role session duration in seconds |
 | `working_directory` | no | `./` | Directory containing Terraform config |
 | `tf_version` | no | `1.14.6` | Terraform version to install |
+| `tf_vars` | no | `""` | Extra env vars (one `KEY=VALUE` per line) exported before plan/apply; see [Supplying Terraform variables](#supplying-terraform-variables) |
 
 Plus, for opting into Kosli attestation (see [Kosli attestation](#kosli-attestation) below):
 
@@ -111,6 +112,55 @@ Plus, for opting into Kosli attestation (see [Kosli attestation](#kosli-attestat
 
 `apply.yml` also accepts `tf_state_file_name` (default `main.tfstate`) which names the state file
 under `terraform/<repo>/` in S3. This is used by `apply.yml`'s drift-plan housekeeping; see below.
+
+### Supplying Terraform variables
+
+A variable declared in `variables.tf` with no default and no `.tfvars` entry would normally make
+Terraform prompt for a value on STDIN — which hangs in CI. Use the `tf_vars` input to inject values
+from the calling workflow. Each line is a `KEY=VALUE` pair exported into the job environment before
+plan/apply; because `tf` inherits the environment, any `TF_VAR_<name>` reaches Terraform as the
+value for variable `<name>`. Values must be single-line.
+
+The common case is feeding a freshly built image tag into the apply. The build job pushes the image
+to ECR and outputs the tag; the apply job passes it through `tf_vars`:
+
+```yaml
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      # ... docker build & push to ECR, setting steps.meta.outputs.tag ...
+
+  apply:
+    needs: build
+    permissions:
+      id-token: write
+      contents: write
+    uses: kosli-dev/tf/.github/workflows/apply.yml@main
+    with:
+      aws_region: eu-central-1
+      aws_role_arn: "arn:aws:iam::123456789012:role/my-role"
+      environment: production
+      tf_vars: |
+        TF_VAR_image_tag=${{ needs.build.outputs.image_tag }}
+```
+
+`tf_vars` is intended for **non-sensitive** values — inputs are not masked and may appear in plan
+output. Do not pass secrets through it.
+
+For values that are *static per environment* (rather than computed per build), prefer the existing
+mechanisms instead of `tf_vars`: add them to the per-environment `<profile>.tfvars` files (which
+`tf` auto-selects), or to a committed [`tf.env`](#configuration) file. Neither suits a per-build
+image tag, which changes every run.
+
+> **Drift detection caveat.** `detect-drift.yml` also accepts `tf_vars`, but it plans against a
+> committed baseline SHA and has no per-build value such as an image tag available. If a required
+> variable has no default, the drift plan fails; if it is given a value that differs from what is
+> deployed, drift detection reports false drift every run. For per-build values, give the variable a
+> default in `variables.tf` and/or add `lifecycle { ignore_changes = [...] }` to the resource that
+> consumes it, so the deployed value is not tracked as drift.
 
 ### Secrets
 
