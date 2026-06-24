@@ -21,6 +21,10 @@ on:
       environment:
         required: true
         type: string
+      tf_vars:
+        description: "Extra environment variables, one KEY=VALUE per line, exported before plan/apply. To set Terraform variable `foo`, use `TF_VAR_foo=...`. Single-line values only."
+        default: ""
+        type: string
       tf_state_file_name:
         description: "Name of the state file in S3 under terraform/<repo>/."
         default: "main.tfstate"
@@ -60,6 +64,7 @@ jobs:
       tf_version: ${{ inputs.tf_version }}
       environment: ${{ inputs.environment }}
       tf_apply: true
+      tf_vars: ${{ inputs.tf_vars }}
       kosli_template_file: ${{ inputs.kosli_template_file }}
       kosli_host: ${{ inputs.kosli_host }}
       kosli_org: ${{ inputs.kosli_org }}

@@ -27,6 +27,10 @@ on:
       ref:
         default: ""
         type: string
+      tf_vars:
+        description: "Extra environment variables, one KEY=VALUE per line, exported before plan/apply. To set Terraform variable `foo`, use `TF_VAR_foo=...`. Single-line values only."
+        default: ""
+        type: string
       kosli_template_file:
         description: "Path (in caller repo) to the Kosli trail template. Empty disables all Kosli steps."
         default: ""
@@ -103,6 +107,12 @@ jobs:
         uses: kosli-dev/setup-cli-action@d4e28a69867117f50417f53eda3ee23867150899 # v3
         with:
           version: ${{ inputs.kosli_cli_version }}
+
+      - name: Export Terraform variables
+        if: inputs.tf_vars != ''
+        env:
+          TF_VARS: ${{ inputs.tf_vars }}
+        run: printf '%s\n' "$TF_VARS" >> "$GITHUB_ENV"
 
       - name: Plan
         working-directory: ${{ inputs.working_directory }}

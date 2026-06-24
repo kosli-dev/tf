@@ -21,6 +21,10 @@ on:
       environment:
         required: true
         type: string
+      tf_vars:
+        description: "Extra environment variables, one KEY=VALUE per line, exported before the drift plan. To set Terraform variable `foo`, use `TF_VAR_foo=...`. Single-line values only. Note: for per-build values (e.g. an image tag) give the variable a default in variables.tf instead, otherwise drift detection reports false drift."
+        default: ""
+        type: string
 
 concurrency:
   group: detect-drift-${{ github.repository }}-${{ inputs.environment }}
@@ -93,6 +97,7 @@ jobs:
       environment: ${{ inputs.environment }}
       ref: ${{ needs.fetch-baseline.outputs.sha }}
       tf_apply: false
+      tf_vars: ${{ inputs.tf_vars }}
 
   flag-drift:
     needs: [fetch-baseline, plan]
