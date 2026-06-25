@@ -25,6 +25,10 @@ on:
         description: "GitHub repository (owner/name) to check out. Defaults to the repository that initiated the run. Override when a workflow in one repository needs to operate on a different repository's Terraform code."
         default: ${{ github.repository }}
         type: string
+      ref:
+        description: "Git reference (branch, tag or SHA) to check out. Defaults to the default branch of the checked-out repository."
+        default: ""
+        type: string
       tf_vars:
         description: "Extra environment variables, one KEY=VALUE per line, exported before plan. To set Terraform variable `foo`, use `TF_VAR_foo=...`. Single-line values only."
         default: ""
@@ -62,6 +66,7 @@ jobs:
       environment: ${{ inputs.environment }}
       tf_apply: false
       github_repository_to_checkout: ${{ inputs.github_repository_to_checkout }}
+      ref: ${{ inputs.ref }}
       tf_vars: ${{ inputs.tf_vars }}
       kosli_template_file: ${{ inputs.kosli_template_file }}
       kosli_host: ${{ inputs.kosli_host }}
