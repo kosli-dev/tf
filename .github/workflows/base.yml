@@ -154,7 +154,7 @@ jobs:
 
       - name: Kosli begin trail
         if: inputs.kosli_template_file != ''
-        run: kosli begin trail "$KOSLI_TRAIL" --template-file "${{ inputs.kosli_template_file }}"
+        run: kosli begin trail "$KOSLI_TRAIL" --template-file "${{ inputs.kosli_template_file }}" --commit "$KOSLI_TRAIL"
 
       - name: Kosli attest plan
         if: inputs.kosli_template_file != ''
