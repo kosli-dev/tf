@@ -124,7 +124,7 @@ jobs:
 
       - name: Upload drift plan to S3
         run: |
-          aws s3 cp /tmp/drift.plan.json "s3://${S3_BUCKET}/terraform/${{ github.event.repository.name }}/drift.plan.json"
+          aws s3 cp /tmp/drift.plan.json "s3://${S3_BUCKET}/terraform/${{ inputs.github_repository_to_checkout }}/drift.plan.json"
 
       - name: Upload drift plan artifact
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
@@ -143,7 +143,7 @@ jobs:
         if: inputs.kosli_template_file != ''
         run: |
           aws s3 cp \
-            "s3://${S3_BUCKET}/terraform/${{ github.event.repository.name }}/${{ inputs.tf_state_file_name }}" \
+            "s3://${S3_BUCKET}/terraform/${{ inputs.github_repository_to_checkout }}/${{ inputs.tf_state_file_name }}" \
             "/tmp/${{ inputs.tf_state_file_name }}"
 
       - name: Kosli attest state file
