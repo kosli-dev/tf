@@ -48,7 +48,7 @@ on:
         default: "kosli"
         type: string
       kosli_cli_version:
-        default: "2.17.4"
+        default: "latest"
         type: string
     secrets:
       kosli_api_token:
@@ -135,7 +135,7 @@ jobs:
 
       - name: Setup Kosli CLI
         if: inputs.kosli_template_file != ''
-        uses: kosli-dev/setup-cli-action@d4e28a69867117f50417f53eda3ee23867150899 # v3
+        uses: kosli-dev/setup-cli-action@060e7f9bf6ac246743d6a62c5df847dfe7050867 # v5.2.1
         with:
           version: ${{ inputs.kosli_cli_version }}
 
