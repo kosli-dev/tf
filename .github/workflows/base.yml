@@ -154,7 +154,6 @@ jobs:
 
       - name: Kosli begin trail
         if: inputs.kosli_template_file != ''
-        working-directory: ${{ inputs.working_directory }}
         run: kosli begin trail "$KOSLI_TRAIL" --template-file "${{ inputs.kosli_template_file }}"
 
       - name: Kosli attest plan
