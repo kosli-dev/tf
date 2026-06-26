@@ -158,7 +158,7 @@ jobs:
 
       - name: Kosli attest plan
         if: inputs.kosli_template_file != ''
-        run: kosli attest generic --name terraform-plan --attachments /tmp/${{ inputs.environment }}.plan.txt
+        run: kosli attest generic --name terraform-plan --attachments /tmp/${{ inputs.environment }}.plan.txt --commit "$KOSLI_TRAIL"
 
       - name: Apply
         if: inputs.tf_apply
@@ -184,4 +184,4 @@ jobs:
 
       - name: Kosli attest apply
         if: inputs.tf_apply && inputs.kosli_template_file != ''
-        run: kosli attest generic --name terraform-apply --attachments /tmp/${{ inputs.environment }}.apply.txt
+        run: kosli attest generic --name terraform-apply --attachments /tmp/${{ inputs.environment }}.apply.txt --commit "$KOSLI_TRAIL"
