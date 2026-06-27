@@ -54,6 +54,10 @@ on:
       kosli_cli_version:
         default: "latest"
         type: string
+      pass_commit_to_kosli_commands:
+        description: "When true, pass `--commit <ref>` to the Kosli commands via the COMMIT_ARG environment variable."
+        default: false
+        type: boolean
     secrets:
       kosli_api_token:
         description: "Kosli API token. Required when kosli_template_file is set."
@@ -84,6 +88,7 @@ jobs:
       kosli_org: ${{ inputs.kosli_org }}
       kosli_flow: terraform-apply-${{ inputs.environment }}-${{ github.event.repository.name }}
       kosli_cli_version: ${{ inputs.kosli_cli_version }}
+      pass_commit_to_kosli_commands: ${{ inputs.pass_commit_to_kosli_commands }}
     secrets:
       kosli_api_token: ${{ secrets.kosli_api_token }}
 
@@ -100,6 +105,7 @@ jobs:
       KOSLI_API_TOKEN: ${{ secrets.kosli_api_token }}
       KOSLI_FLOW: terraform-apply-${{ inputs.environment }}-${{ github.event.repository.name }}
       KOSLI_TRAIL: ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
+      COMMIT_ARG: ${{ inputs.pass_commit_to_kosli_commands && format('--commit {0}', inputs.ref) || '' }}
       GH_TOKEN: ${{ secrets.kosli_github_token }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -152,11 +158,11 @@ jobs:
 
       - name: Kosli attest state file
         if: inputs.kosli_template_file != ''
-        run: kosli attest artifact "/tmp/${{ inputs.tf_state_file_name }}" --artifact-type file --name terraform-state --commit "$KOSLI_TRAIL"
+        run: kosli attest artifact "/tmp/${{ inputs.tf_state_file_name }}" --artifact-type file --name terraform-state $COMMIT_ARG
 
       - name: Kosli attest drift plan
         if: inputs.kosli_template_file != ''
-        run: kosli attest artifact /tmp/drift.plan.json --artifact-type file --name drift-plan --commit "$KOSLI_TRAIL"
+        run: kosli attest artifact /tmp/drift.plan.json --artifact-type file --name drift-plan $COMMIT_ARG
 
       - name: Kosli attest pull request
         if: inputs.kosli_template_file != '' && env.GH_TOKEN != ''
@@ -164,4 +170,4 @@ jobs:
           kosli attest pr github \
             --name pull-request \
             --github-token "$GH_TOKEN" \
-            --commit "$KOSLI_TRAIL"
+            $COMMIT_ARG

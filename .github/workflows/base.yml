@@ -52,6 +52,10 @@ on:
       kosli_cli_version:
         default: "latest"
         type: string
+      pass_commit_to_kosli_commands:
+        description: "When true, pass `--commit <ref>` to the Kosli commands via the COMMIT_ARG environment variable."
+        default: false
+        type: boolean
     secrets:
       kosli_api_token:
         description: "Kosli API token. Required when kosli_template_file is set."
@@ -72,6 +76,7 @@ jobs:
       KOSLI_API_TOKEN: ${{ secrets.kosli_api_token }}
       KOSLI_FLOW: ${{ inputs.kosli_flow }}
       KOSLI_TRAIL: ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
+      COMMIT_ARG: ${{ inputs.pass_commit_to_kosli_commands && format('--commit {0}', inputs.ref) || '' }}
     permissions:
       id-token: write
       contents: write
@@ -154,11 +159,11 @@ jobs:
 
       - name: Kosli begin trail
         if: inputs.kosli_template_file != ''
-        run: kosli begin trail "$KOSLI_TRAIL" --template-file "${{ inputs.kosli_template_file }}" --commit "$KOSLI_TRAIL"
+        run: kosli begin trail "$KOSLI_TRAIL" --template-file "${{ inputs.kosli_template_file }}" $COMMIT_ARG
 
       - name: Kosli attest plan
         if: inputs.kosli_template_file != ''
-        run: kosli attest generic --name terraform-plan --attachments /tmp/${{ inputs.environment }}.plan.txt --commit "$KOSLI_TRAIL"
+        run: kosli attest generic --name terraform-plan --attachments /tmp/${{ inputs.environment }}.plan.txt $COMMIT_ARG
 
       - name: Apply
         if: inputs.tf_apply
@@ -184,4 +189,4 @@ jobs:
 
       - name: Kosli attest apply
         if: inputs.tf_apply && inputs.kosli_template_file != ''
-        run: kosli attest generic --name terraform-apply --attachments /tmp/${{ inputs.environment }}.apply.txt --commit "$KOSLI_TRAIL"
+        run: kosli attest generic --name terraform-apply --attachments /tmp/${{ inputs.environment }}.apply.txt $COMMIT_ARG
