@@ -175,11 +175,15 @@ jobs:
 
       - name: Kosli begin trail
         if: inputs.kosli_template_file != ''
-        run: kosli begin trail "$KOSLI_TRAIL" --template-file "${{ inputs.kosli_template_file }}" $COMMIT_ARG
+        run: |
+          # shellcheck disable=SC2086
+          kosli begin trail "$KOSLI_TRAIL" --template-file "${{ inputs.kosli_template_file }}" $COMMIT_ARG
 
       - name: Kosli attest plan
         if: inputs.kosli_template_file != ''
-        run: kosli attest generic --name terraform-plan --attachments /tmp/${{ inputs.environment }}.plan.txt $COMMIT_ARG
+        run: |
+          # shellcheck disable=SC2086
+          kosli attest generic --name terraform-plan --attachments /tmp/${{ inputs.environment }}.plan.txt $COMMIT_ARG
 
       - name: Apply
         if: inputs.tf_apply
@@ -205,4 +209,6 @@ jobs:
 
       - name: Kosli attest apply
         if: inputs.tf_apply && inputs.kosli_template_file != ''
-        run: kosli attest generic --name terraform-apply --attachments /tmp/${{ inputs.environment }}.apply.txt $COMMIT_ARG
+        run: |
+          # shellcheck disable=SC2086
+          kosli attest generic --name terraform-apply --attachments /tmp/${{ inputs.environment }}.apply.txt $COMMIT_ARG
