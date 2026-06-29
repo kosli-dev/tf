@@ -64,6 +64,12 @@ on:
       has_changes:
         description: "true if the plan contains changes, false if no changes"
         value: ${{ jobs.terraform.outputs.has_changes }}
+      kosli_flow:
+        description: "The Kosli flow name used for attestations."
+        value: ${{ jobs.terraform.outputs.kosli_flow }}
+      kosli_trail:
+        description: "The Kosli trail name used for attestations."
+        value: ${{ jobs.terraform.outputs.kosli_trail }}
 
 jobs:
   terraform:
@@ -82,11 +88,21 @@ jobs:
       contents: write
     outputs:
       has_changes: ${{ steps.plan-summary.outputs.has_changes }}
+      kosli_flow: ${{ steps.kosli-outputs.outputs.kosli_flow }}
+      kosli_trail: ${{ steps.kosli-outputs.outputs.kosli_trail }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ${{ inputs.github_repository_to_checkout }}
           ref: ${{ inputs.ref }}
+
+      - name: Export Kosli outputs
+        id: kosli-outputs
+        run: |
+          {
+            echo "kosli_flow=$KOSLI_FLOW"
+            echo "kosli_trail=$KOSLI_TRAIL"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: hashicorp/setup-terraform@5e8dbf3c6d9deaf4193ca7a8fb23f2ac83bb6c85 # v4.0.0
         with:
@@ -159,11 +175,15 @@ jobs:
 
       - name: Kosli begin trail
         if: inputs.kosli_template_file != ''
-        run: kosli begin trail "$KOSLI_TRAIL" --template-file "${{ inputs.kosli_template_file }}" $COMMIT_ARG
+        run: |
+          # shellcheck disable=SC2086
+          kosli begin trail "$KOSLI_TRAIL" --template-file "${{ inputs.kosli_template_file }}" $COMMIT_ARG
 
       - name: Kosli attest plan
         if: inputs.kosli_template_file != ''
-        run: kosli attest generic --name terraform-plan --attachments /tmp/${{ inputs.environment }}.plan.txt $COMMIT_ARG
+        run: |
+          # shellcheck disable=SC2086
+          kosli attest generic --name terraform-plan --attachments /tmp/${{ inputs.environment }}.plan.txt $COMMIT_ARG
 
       - name: Apply
         if: inputs.tf_apply
@@ -189,4 +209,6 @@ jobs:
 
       - name: Kosli attest apply
         if: inputs.tf_apply && inputs.kosli_template_file != ''
-        run: kosli attest generic --name terraform-apply --attachments /tmp/${{ inputs.environment }}.apply.txt $COMMIT_ARG
+        run: |
+          # shellcheck disable=SC2086
+          kosli attest generic --name terraform-apply --attachments /tmp/${{ inputs.environment }}.apply.txt $COMMIT_ARG
