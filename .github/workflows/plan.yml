@@ -50,6 +50,13 @@ on:
       kosli_api_token:
         description: "Kosli API token. Required when kosli_template_file is set."
         required: false
+    outputs:
+      kosli_flow:
+        description: "The Kosli flow name used for attestations."
+        value: ${{ jobs.plan.outputs.kosli_flow }}
+      kosli_trail:
+        description: "The Kosli trail name used for attestations."
+        value: ${{ jobs.plan.outputs.kosli_trail }}
 
 jobs:
   plan:

@@ -65,6 +65,13 @@ on:
       kosli_github_token:
         description: "GitHub token used by `kosli attest pr github` to look up pull requests. Optional; when omitted the pull-request attestation step is skipped. Cannot be named `github_token` because that name is reserved by `workflow_call`."
         required: false
+    outputs:
+      kosli_flow:
+        description: "The Kosli flow name used for attestations."
+        value: ${{ jobs.apply.outputs.kosli_flow }}
+      kosli_trail:
+        description: "The Kosli trail name used for attestations."
+        value: ${{ jobs.apply.outputs.kosli_trail }}
 
 jobs:
   apply:
@@ -103,8 +110,8 @@ jobs:
       KOSLI_ORG: ${{ inputs.kosli_org }}
       KOSLI_HOST: ${{ inputs.kosli_host }}
       KOSLI_API_TOKEN: ${{ secrets.kosli_api_token }}
-      KOSLI_FLOW: terraform-apply-${{ inputs.environment }}-${{ github.event.repository.name }}
-      KOSLI_TRAIL: ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
+      KOSLI_FLOW: ${{ needs.apply.outputs.kosli_flow }}
+      KOSLI_TRAIL: ${{ needs.apply.outputs.kosli_trail }}
       COMMIT_ARG: ${{ inputs.pass_commit_to_kosli_commands && format('--commit {0}', inputs.ref) || '' }}
       GH_TOKEN: ${{ secrets.kosli_github_token }}
     steps:
