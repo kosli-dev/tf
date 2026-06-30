@@ -152,7 +152,7 @@ jobs:
 
       - name: Setup Kosli CLI
         if: inputs.kosli_template_file != ''
-        uses: kosli-dev/setup-cli-action@v5
+        uses: kosli-dev/setup-cli-action@35a4ac9d5bbe9c46c630c274ad2dc93be6bc9b3a # v5.1.0
         with:
           version: ${{ inputs.kosli_cli_version }}
 
