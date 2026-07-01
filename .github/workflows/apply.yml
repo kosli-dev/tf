@@ -137,7 +137,7 @@ jobs:
 
       - name: Create drift plan
         run: |
-          jq -n --arg sha "${{ github.event.pull_request.head.sha || github.sha }}" --arg account "$AWS_ACCOUNT_ID" '{sha: $sha, drift: false, aws_account_id: $account}' > /tmp/drift.plan.json
+          jq -n --arg sha "${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}" --arg account "$AWS_ACCOUNT_ID" '{sha: $sha, drift: false, aws_account_id: $account}' > /tmp/drift.plan.json
 
       - name: Upload drift plan to S3
         run: |
