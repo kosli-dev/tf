@@ -186,6 +186,7 @@ jobs:
           kosli attest generic --name terraform-plan --attachments /tmp/${{ inputs.environment }}.plan.txt $COMMIT_ARG
 
       - name: Apply
+        shell: bash
         if: inputs.tf_apply
         working-directory: ${{ inputs.working_directory }}
         run: tf apply 2>&1 | tee /tmp/${{ inputs.environment }}.apply.txt
