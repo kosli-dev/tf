@@ -189,7 +189,7 @@ jobs:
         shell: bash
         if: inputs.tf_apply
         working-directory: ${{ inputs.working_directory }}
-        run: tf apply 2>&1 | tee /tmp/${{ inputs.environment }}.apply.txt
+        run: tf apply -no-color 2>&1 | tee /tmp/${{ inputs.environment }}.apply.txt
 
       - name: Apply summary
         if: inputs.tf_apply
