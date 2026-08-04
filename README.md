@@ -100,6 +100,7 @@ Both `plan.yml` and `apply.yml` accept the same core inputs:
 | `working_directory` | no | `./` | Directory containing Terraform config |
 | `tf_version` | no | `1.14.6` | Terraform version to install |
 | `tf_vars` | no | `""` | Extra env vars (one `KEY=VALUE` per line) exported before plan/apply; see [Supplying Terraform variables](#supplying-terraform-variables) |
+| `job_timeout_minutes` | no | `30` | Minutes before GitHub cancels the plan/apply job; see [Timeouts](#timeouts) |
 
 Plus, for opting into Kosli attestation (see [Kosli attestation](#kosli-attestation) below):
 
@@ -168,6 +169,60 @@ image tag, which changes every run.
 |---|---|---|
 | `kosli_api_token` | if `kosli_template_file` is set | Kosli API token for the attest steps. |
 | `kosli_github_token` | no (only `apply.yml`) | GitHub token used by `kosli attest pr github` to look up pull requests. When omitted, the pull-request attestation step is skipped. Typically passed as `${{ secrets.GITHUB_TOKEN }}` — in which case the **calling job must also declare `pull-requests: read`** in its `permissions:` block (see example below), otherwise the attestation step will fail with `Resource not accessible by integration`. |
+
+### Timeouts
+
+Every job carries a `timeout-minutes` rather than inheriting GitHub's 360-minute default, and the
+OIDC credential step is bounded so that an unreachable STS endpoint fails in under a minute instead
+of holding a runner — and the environment's `concurrency` group — for over an hour:
+
+```yaml
+      - name: Configure AWS credentials
+        timeout-minutes: 2
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+        with:
+          # ...
+          action-timeout-s: 45
+          retry-max-attempts: 3
+```
+
+These are the standard values for **any** Kosli workflow using
+`aws-actions/configure-aws-credentials`, not just the ones here. The reasoning:
+
+| Setting | Value | Why |
+|---|---|---|
+| `action-timeout-s` | `45` | Bounds the action as a whole, retries included. Across recent successful runs in `kosli-dev` and `cyber-dojo` the step took 0–2s, worst case 6s, so 45s is far above the real p99 and will not fail a slow-but-healthy authentication. |
+| `retry-max-attempts` | `3` | The default is 12. STS throttling is genuinely transient and worth retrying, but 12 attempts is only useful if each attempt is fast — which is exactly what fails to hold when the endpoint is unreachable. |
+| `timeout-minutes` (step) | `2` | A backstop that holds regardless of how the action behaves or what a future version changes. |
+| `timeout-minutes` (job) | `30` plan/apply, `5`–`10` housekeeping | Bounded by `aws_role_duration`, not by how long Terraform might take — see below. |
+
+`disable-retry` is deliberately **not** used: a couple of quick retries is worth having, and
+`action-timeout-s` already bounds the total cost of them.
+
+The plan/apply job's default of 30 minutes is **derived from `aws_role_duration`**, which defaults
+to `1200` (20 minutes). The credentials the OIDC step exports are static environment variables and
+are never refreshed, so 20 minutes after that step every AWS call starts failing with
+`ExpiredToken` — a longer job ceiling would buy nothing, because the work cannot usefully continue.
+Measured against real runs, setup before the credentials step takes 1–35s, so a job that consumes
+its entire credential lifetime lands around 22–23 minutes; 30 leaves headroom without being
+arbitrary.
+
+The two values are coupled, so **raise `job_timeout_minutes` and `aws_role_duration` together** when
+a repository has a legitimately long apply. Raising only the session duration lets the job be
+cancelled part-way through an `apply`, which can leave the state lock held — a worse outcome than a
+slow run. Raising only the job ceiling buys time in which every AWS call fails:
+
+```yaml
+    with:
+      aws_role_duration: "3600"   # 60 min session
+      job_timeout_minutes: 70     # 60 + setup + headroom
+```
+
+The role's own maximum session duration is the hard limit on `aws_role_duration`; if a longer
+session is refused, that maximum needs raising on the IAM role first.
+
+A job that fails in 45 seconds can be re-run for nothing. A job that hangs for 82 minutes blocks
+every apply queued behind it.
 
 ### What it does
 

@@ -21,6 +21,10 @@ on:
       tf_apply:
         default: false
         type: boolean
+      job_timeout_minutes:
+        description: "Minutes before GitHub cancels the plan/apply job. The default follows aws_role_duration: the OIDC credentials are static environment variables that are never refreshed, so AWS calls start failing with ExpiredToken 1200s (20 min) after the credentials step and a longer ceiling would buy nothing. Raise both together if a legitimate apply needs longer."
+        default: 30
+        type: number
       environment:
         required: true
         type: string
@@ -74,6 +78,7 @@ on:
 jobs:
   terraform:
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.job_timeout_minutes }}
     env:
       AWS_DEFAULT_REGION: ${{ inputs.aws_region }}
       environment: ${{ inputs.environment }}
@@ -121,12 +126,15 @@ jobs:
         run: terraform fmt --recursive -check
 
       - name: Configure AWS credentials
+        timeout-minutes: 2
         uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
         with:
           role-to-assume: ${{ inputs.aws_role_arn }}
           aws-region: ${{ inputs.aws_region }}
           role-duration-seconds: ${{ inputs.aws_role_duration }}
           role-session-name: ${{ github.event.repository.name }}
+          action-timeout-s: 45
+          retry-max-attempts: 3
 
       - name: Setup Kosli CLI
         if: inputs.kosli_template_file != ''
