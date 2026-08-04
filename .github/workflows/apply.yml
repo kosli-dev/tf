@@ -58,6 +58,10 @@ on:
         description: "When true, pass `--commit <ref>` to the Kosli commands via the COMMIT_ARG environment variable."
         default: false
         type: boolean
+      job_timeout_minutes:
+        description: "Minutes before GitHub cancels the apply job. Raise it together with aws_role_duration when a legitimate apply needs longer; see the README on timeouts."
+        default: 30
+        type: number
     secrets:
       kosli_api_token:
         description: "Kosli API token. Required when kosli_template_file is set."
@@ -96,12 +100,14 @@ jobs:
       kosli_flow: terraform-apply-${{ inputs.environment }}-${{ github.event.repository.name }}
       kosli_cli_version: ${{ inputs.kosli_cli_version }}
       pass_commit_to_kosli_commands: ${{ inputs.pass_commit_to_kosli_commands }}
+      job_timeout_minutes: ${{ inputs.job_timeout_minutes }}
     secrets:
       kosli_api_token: ${{ secrets.kosli_api_token }}
 
   reset-drift-detection:
     needs: apply
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       id-token: write
       contents: read
@@ -121,12 +127,15 @@ jobs:
           ref: ${{ inputs.ref }}
 
       - name: Configure AWS credentials
+        timeout-minutes: 2
         uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
         with:
           role-to-assume: ${{ inputs.aws_role_arn }}
           aws-region: ${{ inputs.aws_region }}
           role-duration-seconds: ${{ inputs.aws_role_duration }}
           role-session-name: ${{ github.event.repository.name }}
+          action-timeout-s: 45
+          retry-max-attempts: 3
 
       - name: Compute state bucket name
         run: |

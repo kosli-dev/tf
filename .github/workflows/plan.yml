@@ -46,6 +46,10 @@ on:
       kosli_cli_version:
         default: "latest"
         type: string
+      job_timeout_minutes:
+        description: "Minutes before GitHub cancels the plan job. Raise it together with aws_role_duration when a legitimate plan needs longer; see the README on timeouts."
+        default: 30
+        type: number
     secrets:
       kosli_api_token:
         description: "Kosli API token. Required when kosli_template_file is set."
@@ -80,5 +84,6 @@ jobs:
       kosli_org: ${{ inputs.kosli_org }}
       kosli_flow: terraform-plan-${{ inputs.environment }}-${{ github.event.repository.name }}
       kosli_cli_version: ${{ inputs.kosli_cli_version }}
+      job_timeout_minutes: ${{ inputs.job_timeout_minutes }}
     secrets:
       kosli_api_token: ${{ secrets.kosli_api_token }}
