@@ -164,12 +164,22 @@ jobs:
       - name: Plan summary
         id: plan-summary
         run: |
-          line=$(grep -E 'No changes\.|Plan: ' /tmp/${{ inputs.environment }}.plan.txt)
+          # A plan that changes only outputs has neither a "Plan:" line nor
+          # "No changes.", so fall back to the outputs header and then to a
+          # generic message rather than letting grep fail the step.
+          plan=/tmp/${{ inputs.environment }}.plan.txt
+          line=$(grep -E 'No changes\.|Plan: ' "$plan" || true)
+          if [ -z "$line" ]; then
+            line=$(grep -E 'Changes to Outputs:' "$plan" || true)
+          fi
+          if [ -z "$line" ]; then
+            line="See the uploaded plan for details."
+          fi
           {
             echo "### ${{ inputs.environment }}"
             echo "$line"
           } >> "$GITHUB_STEP_SUMMARY"
-          if grep -q 'No changes\.' /tmp/${{ inputs.environment }}.plan.txt; then
+          if grep -q 'No changes\.' "$plan"; then
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
           else
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
