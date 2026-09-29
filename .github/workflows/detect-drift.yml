@@ -29,10 +29,19 @@ on:
         description: "Minutes before GitHub cancels the drift plan job. Raise it together with aws_role_duration when a legitimate plan needs longer; see the README on timeouts."
         default: 30
         type: number
+      component_name:
+        description: "Name of the thing being deployed. Used for the statefile and drift file paths, terraform/<name>/. Empty uses the repository name. Must match the component_name the apply workflow was given."
+        default: ""
+        type: string
 
 concurrency:
-  group: detect-drift-${{ github.repository }}-${{ inputs.environment }}
+  # One group per component, so several components' drift runs in one
+  # repository do not replace each other's pending run.
+  group: detect-drift-${{ inputs.component_name || github.repository }}-${{ inputs.environment }}
   cancel-in-progress: false
+
+env:
+  STATE_DIR: terraform/${{ inputs.component_name || github.event.repository.name }}
 
 jobs:
   fetch-baseline:
@@ -64,7 +73,7 @@ jobs:
 
       - name: Check baseline exists
         run: |
-          KEY="terraform/${{ github.event.repository.name }}/drift.plan.json"
+          KEY="${STATE_DIR}/drift.plan.json"
           if ! aws s3api head-object --bucket "$S3_BUCKET" --key "$KEY" >/dev/null 2>&1; then
             echo "::error::No drift baseline at s3://${S3_BUCKET}/${KEY} — run the apply workflow at least once to seed it."
             exit 1
@@ -72,7 +81,7 @@ jobs:
 
       - name: Download baseline
         run: |
-          aws s3 cp "s3://${S3_BUCKET}/terraform/${{ github.event.repository.name }}/drift.plan.json" /tmp/drift.plan.json
+          aws s3 cp "s3://${S3_BUCKET}/${STATE_DIR}/drift.plan.json" /tmp/drift.plan.json
 
       - name: Read baseline
         id: read
@@ -106,6 +115,7 @@ jobs:
       ref: ${{ needs.fetch-baseline.outputs.sha }}
       tf_apply: false
       tf_vars: ${{ inputs.tf_vars }}
+      component_name: ${{ inputs.component_name }}
       job_timeout_minutes: ${{ inputs.job_timeout_minutes }}
 
   flag-drift:
@@ -144,7 +154,7 @@ jobs:
 
       - name: Upload drift plan to S3
         run: |
-          aws s3 cp /tmp/drift.plan.json "s3://${S3_BUCKET}/terraform/${{ github.event.repository.name }}/drift.plan.json"
+          aws s3 cp /tmp/drift.plan.json "s3://${S3_BUCKET}/${STATE_DIR}/drift.plan.json"
 
       - name: Drift summary
         run: |

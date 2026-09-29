@@ -39,6 +39,10 @@ on:
         description: "Extra environment variables, one KEY=VALUE per line, exported before plan/apply. To set Terraform variable `foo`, use `TF_VAR_foo=...`. Single-line values only."
         default: ""
         type: string
+      component_name:
+        description: "Name of the thing being deployed, used for the statefile path terraform/<name>/. Empty uses the checked-out repository's name. Set it when one repository deploys several components, each with its own state."
+        default: ""
+        type: string
       kosli_template_file:
         description: "Path (in caller repo) to the Kosli trail template. Empty disables all Kosli steps."
         default: ""
@@ -146,6 +150,14 @@ jobs:
         uses: kosli-dev/setup-cli-action@060e7f9bf6ac246743d6a62c5df847dfe7050867 # v5.2.1
         with:
           version: ${{ inputs.kosli_cli_version }}
+
+      # Exported only when set, so an unset input leaves TF_COMPONENT_NAME
+      # free to come from the repo's tf.env, as it does when tf runs locally.
+      - name: Export component name
+        if: inputs.component_name != ''
+        env:
+          COMPONENT_NAME: ${{ inputs.component_name }}
+        run: printf 'TF_COMPONENT_NAME=%s\n' "$COMPONENT_NAME" >> "$GITHUB_ENV"
 
       - name: Export Terraform variables
         if: inputs.tf_vars != ''
