@@ -474,3 +474,19 @@ class TestTfRunnerForceUnlock:
         mock_execvp.assert_called_once_with(
             "terraform", ["terraform", "force-unlock", "abc123"]
         )
+
+
+class TestTfRunnerStateKey:
+    def test_init_keys_state_on_component_name(self, monkeypatch):
+        monkeypatch.setenv("AWS_VAULT", "beta")
+        monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-central-1")
+        monkeypatch.setenv("TF_COMPONENT_NAME", "creator")
+
+        with patch("tf.TfBackend._get_repo_name", return_value="web"), \
+             patch("tf.TfVarsFiles._get_account_id", return_value="244531986313"), \
+             patch("tf.subprocess.run", return_value=type("R", (), {"returncode": 0})()) as mock_run, \
+             patch("tf.os.execvp"):
+            tf.TfRunner(["force-unlock", "abc123"]).call()
+
+        init_command = mock_run.call_args[0][0]
+        assert "-backend-config=key=terraform/creator/main.tfstate" in init_command

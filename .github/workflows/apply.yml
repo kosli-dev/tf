@@ -26,8 +26,12 @@ on:
         default: ${{ github.repository }}
         type: string
       github_repository_name:
-        description: "GitHub repository name (without the owner) used to locate the statefile and drift file. Defaults to the repository that initiated the run. Override when a workflow in one repository needs to operate on a different repository's Terraform code."
+        description: "GitHub repository name (without the owner) used to locate the statefile and drift file when component_name is empty. Defaults to the repository that initiated the run. Override when a workflow in one repository needs to operate on a different repository's Terraform code."
         default: ${{ github.event.repository.name }}
+        type: string
+      component_name:
+        description: "Name of the thing being deployed. Used for the statefile path, the drift file path, and the Kosli flow name. Both paths are under terraform/<name>/. Empty keeps the repository-name defaults. Set it when one repository deploys several components, each with its own state."
+        default: ""
         type: string
       ref:
         description: "Git reference (branch, tag or SHA) to check out. Defaults to the default branch of the checked-out repository."
@@ -94,10 +98,11 @@ jobs:
       github_repository_to_checkout: ${{ inputs.github_repository_to_checkout }}
       ref: ${{ inputs.ref }}
       tf_vars: ${{ inputs.tf_vars }}
+      component_name: ${{ inputs.component_name }}
       kosli_template_file: ${{ inputs.kosli_template_file }}
       kosli_host: ${{ inputs.kosli_host }}
       kosli_org: ${{ inputs.kosli_org }}
-      kosli_flow: terraform-apply-${{ inputs.environment }}-${{ github.event.repository.name }}
+      kosli_flow: terraform-apply-${{ inputs.environment }}-${{ inputs.component_name || github.event.repository.name }}
       kosli_cli_version: ${{ inputs.kosli_cli_version }}
       pass_commit_to_kosli_commands: ${{ inputs.pass_commit_to_kosli_commands }}
       job_timeout_minutes: ${{ inputs.job_timeout_minutes }}
@@ -120,6 +125,7 @@ jobs:
       KOSLI_TRAIL: ${{ needs.apply.outputs.kosli_trail }}
       COMMIT_ARG: ${{ inputs.pass_commit_to_kosli_commands && format('--commit {0}', inputs.ref) || '' }}
       GH_TOKEN: ${{ secrets.kosli_github_token }}
+      STATE_DIR: terraform/${{ inputs.component_name || inputs.github_repository_name }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -150,7 +156,7 @@ jobs:
 
       - name: Upload drift plan to S3
         run: |
-          aws s3 cp /tmp/drift.plan.json "s3://${S3_BUCKET}/terraform/${{ inputs.github_repository_name }}/drift.plan.json"
+          aws s3 cp /tmp/drift.plan.json "s3://${S3_BUCKET}/${STATE_DIR}/drift.plan.json"
 
       - name: Upload drift plan artifact
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
@@ -169,7 +175,7 @@ jobs:
         if: inputs.kosli_template_file != ''
         run: |
           aws s3 cp \
-            "s3://${S3_BUCKET}/terraform/${{ inputs.github_repository_name }}/${{ inputs.tf_state_file_name }}" \
+            "s3://${S3_BUCKET}/${STATE_DIR}/${{ inputs.tf_state_file_name }}" \
             "/tmp/${{ inputs.tf_state_file_name }}"
 
       - name: Kosli attest state file

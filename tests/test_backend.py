@@ -156,3 +156,32 @@ class TestTfBackendRepoName:
 
             with pytest.raises(tf.TfError, match="not a git repo"):
                 tf.TfBackend._get_repo_name()
+
+
+class TestTfBackendComponentName:
+    def test_reads_component_name_from_env(self, monkeypatch):
+        monkeypatch.setenv("TF_COMPONENT_NAME", "creator")
+        with patch("tf.subprocess") as mock_subprocess:
+            mock_subprocess.run.return_value.returncode = 0
+            mock_subprocess.run.return_value.stdout = \
+                "https://github.com/cyber-dojo/web.git\n"
+
+            assert tf.TfBackend._get_component_name() == "creator"
+
+    def test_falls_back_to_repo_name_when_env_is_empty(self, monkeypatch):
+        monkeypatch.setenv("TF_COMPONENT_NAME", "")
+        with patch("tf.subprocess") as mock_subprocess:
+            mock_subprocess.run.return_value.returncode = 0
+            mock_subprocess.run.return_value.stdout = \
+                "https://github.com/cyber-dojo/web.git\n"
+
+            assert tf.TfBackend._get_component_name() == "web"
+
+    def test_falls_back_to_repo_name_when_env_is_unset(self, monkeypatch):
+        monkeypatch.delenv("TF_COMPONENT_NAME", raising=False)
+        with patch("tf.subprocess") as mock_subprocess:
+            mock_subprocess.run.return_value.returncode = 0
+            mock_subprocess.run.return_value.stdout = \
+                "https://github.com/cyber-dojo/web.git\n"
+
+            assert tf.TfBackend._get_component_name() == "web"

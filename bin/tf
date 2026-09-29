@@ -163,6 +163,10 @@ class TfBackend:
             name = name[:-4]
         return name
 
+    @staticmethod
+    def _get_component_name() -> str:
+        return os.environ.get("TF_COMPONENT_NAME") or TfBackend._get_repo_name()
+
 
 SUBCOMMANDS_ACCEPTING_VAR_FILE = frozenset({
     "plan", "apply", "destroy", "import", "refresh", "console",
@@ -213,11 +217,11 @@ class TfRunner:
         account_id = TfVarsFiles._get_account_id()
         if not account_id:
             raise TfError("Cannot determine AWS account ID for backend config.")
-        repo_name = TfBackend._get_repo_name()
+        component_name = TfBackend._get_component_name()
         state_file_name = os.environ.get("TF_STATE_FILE_NAME", "main.tfstate")
         lock_backend = os.environ.get("TF_STATE_LOCK", "s3")
         return TfBackend(
-            account_id=account_id, region=context.region, repo_name=repo_name,
+            account_id=account_id, region=context.region, repo_name=component_name,
             state_file_name=state_file_name, lock_backend=lock_backend,
         )
 

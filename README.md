@@ -101,6 +101,7 @@ Both `plan.yml` and `apply.yml` accept the same core inputs:
 | `tf_version` | no | `1.14.6` | Terraform version to install |
 | `tf_vars` | no | `""` | Extra env vars (one `KEY=VALUE` per line) exported before plan/apply; see [Supplying Terraform variables](#supplying-terraform-variables) |
 | `job_timeout_minutes` | no | `30` | Minutes before GitHub cancels the plan/apply job; see [Timeouts](#timeouts) |
+| `component_name` | no | `""` | Name of the thing being deployed; see [Component name](#component-name). Also accepted by `detect-drift.yml` |
 
 Plus, for opting into Kosli attestation (see [Kosli attestation](#kosli-attestation) below):
 
@@ -113,6 +114,10 @@ Plus, for opting into Kosli attestation (see [Kosli attestation](#kosli-attestat
 
 `apply.yml` also accepts `tf_state_file_name` (default `main.tfstate`) which names the state file
 under `terraform/<repo>/` in S3. This is used by `apply.yml`'s drift-plan housekeeping; see below.
+
+`apply.yml` also accepts `github_repository_name` (default: the calling repository's name), which
+names the drift file's directory when `component_name` is empty. Override it when a workflow in
+one repository operates on a different repository's Terraform code.
 
 ### Supplying Terraform variables
 
@@ -335,6 +340,28 @@ be set in the environment or via `tf.env`:
 ```
 TF_STATE_FILE_NAME=environment-reporter.tfstate
 ```
+
+### Component name
+
+If a single repo deploys several components, each with its own state under its own name, set
+`TF_COMPONENT_NAME` to the component's name. The state is then stored at
+`terraform/<component-name>/main.tfstate` instead of `terraform/<repo-name>/main.tfstate`. Unset
+or empty, the repo name is used. The variable can be set in the environment or via `tf.env`:
+
+```
+TF_COMPONENT_NAME=creator
+```
+
+In GitHub Actions, pass the `component_name` input instead. `plan.yml`, `apply.yml` and
+`detect-drift.yml` all accept it, and each uses it in place of the repo name for:
+
+* the state file path, `terraform/<component-name>/`
+* the drift file, `terraform/<component-name>/drift.plan.json`
+* the Kosli flow, `terraform-plan-<env>-<component-name>` and `terraform-apply-<env>-<component-name>`
+* the drift-detection concurrency group
+
+Give `detect-drift.yml` the same `component_name` as `apply.yml`, so it reads the drift file
+`apply.yml` writes.
 
 ### State locking
 
