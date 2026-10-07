@@ -220,11 +220,60 @@ jobs:
           # shellcheck disable=SC2086
           kosli attest generic --name terraform-plan --attachments /tmp/${{ inputs.environment }}.plan.txt $COMMIT_ARG
 
+      # terraform apply writes the state file even when it fails part-way, and
+      # reset-drift-detection in apply.yml only attests it after a successful
+      # apply. Recording the state file's ETag here lets the step after Apply
+      # tell whether a failed apply rewrote it. The bucket and key are read from
+      # the backend config that `tf plan` initialised, so they are exactly the
+      # ones terraform uses. continue-on-error keeps this step from ever
+      # blocking the apply; if it fails, a failed apply's state is not attested.
+      - name: Record state file ETag before apply
+        id: state-before
+        if: inputs.tf_apply && inputs.kosli_template_file != ''
+        continue-on-error: true
+        working-directory: ${{ inputs.working_directory }}
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          BACKEND=".terraform.${ACCOUNT_ID}-${AWS_DEFAULT_REGION}/terraform.tfstate"
+          BUCKET=$(jq -r '.backend.config.bucket' "$BACKEND")
+          KEY=$(jq -r '.backend.config.key' "$BACKEND")
+          ETAG=$(aws s3api head-object --bucket "$BUCKET" --key "$KEY" --query ETag --output text)
+          {
+            echo "bucket=${BUCKET}"
+            echo "key=${KEY}"
+            echo "etag=${ETAG}"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Apply
+        id: apply
         shell: bash
         if: inputs.tf_apply
         working-directory: ${{ inputs.working_directory }}
         run: tf apply -no-color 2>&1 | tee /tmp/${{ inputs.environment }}.apply.txt
+
+      # Attests the state file only when this failed apply changed it. A state
+      # file the apply did not change may have been written outside CI, so it is
+      # left unattested for drift detection to report. The object is downloaded
+      # with --if-match on the ETag just read, so a write between the two reads
+      # cannot be attested in its place. A write in the seconds between the
+      # apply releasing its lock and the first read would be attested; that is
+      # the same race reset-drift-detection has after a successful apply.
+      - name: Kosli attest state file written by failed apply
+        if: failure() && steps.apply.outcome == 'failure' && steps.state-before.outcome == 'success'
+        env:
+          BUCKET: ${{ steps.state-before.outputs.bucket }}
+          KEY: ${{ steps.state-before.outputs.key }}
+          ETAG_BEFORE: ${{ steps.state-before.outputs.etag }}
+        run: |
+          ETAG_AFTER=$(aws s3api head-object --bucket "$BUCKET" --key "$KEY" --query ETag --output text)
+          if [ "$ETAG_AFTER" = "$ETAG_BEFORE" ]; then
+            echo "The failed apply did not change the state file, so it is not attested."
+            exit 0
+          fi
+          STATE_FILE="/tmp/$(basename "$KEY")"
+          aws s3api get-object --bucket "$BUCKET" --key "$KEY" --if-match "$ETAG_AFTER" "$STATE_FILE" > /dev/null
+          # shellcheck disable=SC2086
+          kosli attest artifact "$STATE_FILE" --artifact-type file --name terraform-state $COMMIT_ARG
 
       - name: Apply summary
         if: inputs.tf_apply
