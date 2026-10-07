@@ -258,11 +258,13 @@ Both workflows can optionally attest each Terraform run to Kosli.  This is opt-i
 * in `apply.yml`, additionally attest the **state file** and the **drift plan** as artifacts so
   that any later out-of-band change to either file is detected as drift by the downstream
   [drift-detection job][drift-doc].
-* if `tf apply` fails but has already rewritten the state file, attest that state file too, so
-  the failed CI apply is not reported as drift. A failed apply that left the state file
-  unchanged attests nothing. A failed apply does not reset the drift plan, which still names
-  the commit of the last successful apply, so if the failed apply changed infrastructure the
-  next [drift-detection job][drift-doc] run reports it as drift until an apply succeeds.
+
+A failed `tf apply` attests nothing, deliberately. Terraform writes the state file as it goes, so
+an apply that fails part-way can leave a rewritten state file that has no provenance in Kosli, and
+the [drift-detection job][drift-doc] reports it as drift. That is the intended outcome: the
+infrastructure is only partly at the merged commit, so it should not be reported as compliant.
+The environment stays non-compliant until an apply of the same component succeeds, so once the
+cause of the failure is fixed, re-run the apply.
 
 The trail template needs to declare every attestation/artifact name the workflow emits:
 
