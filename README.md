@@ -247,6 +247,28 @@ every apply queued behind it.
    so the [drift-detection job][drift-doc] has a known-good baseline to compare against on its
    next run.
 
+### AWS role session name
+
+Every job assumes its role with the session name `<kind>-<commit sha>`, where the kind is `plan`,
+`apply` or `detect-drift`. The session name is the only caller-controlled field that CloudTrail
+records on *every* event a session makes (in `userIdentity.arn` and `userIdentity.principalId`),
+so an auditor can go from any API call straight to the commit that was planned or applied. The
+kind matters because the same commit is planned on its PR, applied on merge and then planned
+again by every drift-detection run, and only the apply is expected to change anything.
+
+The SHA is the commit the job checked out, except on a `pull_request` event, where the checkout
+is GitHub's synthetic merge commit; the PR head commit is recorded instead because the merge
+commit does not outlive the PR. The drift-detection `fetch-baseline` job runs before anything is
+checked out, so it records the commit the run was triggered from.
+
+The session name is limited to 64 characters, which is why it carries no workflow run id: the
+`detect-drift-` prefix plus a 40-character SHA leaves no room for one. Re-runs of the same commit
+share a session name but not an access key id, which CloudTrail also records on every event.
+
+Session tags cannot be used for this: `AssumeRoleWithWebIdentity` has no tags parameter, so the
+Repository/Actor/Branch/Commit tags that `configure-aws-credentials` adds for `AssumeRole` are
+never applied with OIDC.
+
 ### Kosli attestation
 
 Both workflows can optionally attest each Terraform run to Kosli.  This is opt-in: provide a

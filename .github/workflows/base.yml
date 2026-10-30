@@ -21,6 +21,10 @@ on:
       tf_apply:
         default: false
         type: boolean
+      role_session_prefix:
+        description: "Prefix for the AWS role session name, which CloudTrail records on every event the session makes. Defaults to apply or plan, from tf_apply. detect-drift passes detect-drift so its plans can be told apart from a PR plan of the same commit."
+        default: ""
+        type: string
       job_timeout_minutes:
         description: "Minutes before GitHub cancels the plan/apply job. The default follows aws_role_duration: the OIDC credentials are static environment variables that are never refreshed, so AWS calls start failing with ExpiredToken 1200s (20 min) after the credentials step and a longer ceiling would buy nothing. Raise both together if a legitimate apply needs longer."
         default: 30
@@ -78,6 +82,9 @@ on:
       kosli_trail:
         description: "The Kosli trail name used for attestations."
         value: ${{ jobs.terraform.outputs.kosli_trail }}
+      commit_sha:
+        description: "The commit the job checked out and ran Terraform against. On a pull_request event this is the PR head commit, not the synthetic merge commit."
+        value: ${{ jobs.terraform.outputs.commit_sha }}
 
 jobs:
   terraform:
@@ -99,11 +106,23 @@ jobs:
       has_changes: ${{ steps.plan-summary.outputs.has_changes }}
       kosli_flow: ${{ steps.kosli-outputs.outputs.kosli_flow }}
       kosli_trail: ${{ steps.kosli-outputs.outputs.kosli_trail }}
+      commit_sha: ${{ steps.commit.outputs.sha }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ${{ inputs.github_repository_to_checkout }}
           ref: ${{ inputs.ref }}
+
+      - name: Resolve the commit for the AWS role session name
+        id: commit
+        # On a pull_request event the checkout is the synthetic merge commit,
+        # which does not outlive the PR, so record the PR head commit instead.
+        run: |
+          SHA="${{ github.event.pull_request.head.sha }}"
+          if [ -z "$SHA" ]; then
+            SHA=$(git rev-parse HEAD)
+          fi
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Export Kosli outputs
         id: kosli-outputs
@@ -141,7 +160,9 @@ jobs:
           role-to-assume: ${{ inputs.aws_role_arn }}
           aws-region: ${{ inputs.aws_region }}
           role-duration-seconds: ${{ inputs.aws_role_duration }}
-          role-session-name: ${{ github.event.repository.name }}
+          # CloudTrail stamps the session name on every event the session
+          # makes, so it says what kind of run this is and which commit it ran.
+          role-session-name: ${{ inputs.role_session_prefix || (inputs.tf_apply && 'apply' || 'plan') }}-${{ steps.commit.outputs.sha }}
           action-timeout-s: 45
           retry-max-attempts: 3
 
