@@ -139,7 +139,7 @@ jobs:
           role-to-assume: ${{ inputs.aws_role_arn }}
           aws-region: ${{ inputs.aws_region }}
           role-duration-seconds: ${{ inputs.aws_role_duration }}
-          role-session-name: ${{ github.event.repository.name }}
+          role-session-name: apply-${{ needs.apply.outputs.commit_sha }}
           action-timeout-s: 45
           retry-max-attempts: 3
 
