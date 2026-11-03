@@ -276,10 +276,12 @@ Both workflows can optionally attest each Terraform run to Kosli.  This is opt-i
 
 * create the Kosli flow `terraform-plan-<environment>-<repo>` (or `terraform-apply-<environment>-<repo>`) from your template,
 * begin a trail named after the commit SHA being acted on,
-* attest the plan output (and, for apply, the apply log) as generic attestations, and
+* attest the plan output (and, for apply, the apply log) as generic attestations,
 * in `apply.yml`, additionally attest the **state file** and the **drift plan** as artifacts so
   that any later out-of-band change to either file is detected as drift by the downstream
-  [drift-detection job][drift-doc].
+  [drift-detection job][drift-doc], and
+* in `apply.yml`, attest each zip-packaged Lambda function in the state as an artifact named
+  `lambda-<function name>`, with the fingerprint a Kosli Lambda environment reports for it.
 
 A failed `tf apply` attests nothing, deliberately. Terraform writes the state file as it goes, so
 an apply that fails part-way can leave a rewritten state file that has no provenance in Kosli, and

@@ -190,6 +190,27 @@ jobs:
           # shellcheck disable=SC2086
           kosli attest artifact /tmp/drift.plan.json --artifact-type file --name drift-plan $COMMIT_ARG
 
+      # A Lambda environment fingerprints a zip-packaged function by its CodeSha256, which
+      # the state holds base64-encoded as code_sha256. An image-packaged function is left to
+      # the pipeline that builds its image.
+      - name: Kosli attest Lambda functions
+        if: inputs.kosli_template_file != ''
+        run: |
+          jq -r '.resources[]
+                 | select(.mode == "managed" and .type == "aws_lambda_function")
+                 | .instances[].attributes
+                 | select(.package_type == "Zip")
+                 | "\(.function_name) \(.code_sha256)"' \
+            "/tmp/${{ inputs.tf_state_file_name }}" |
+          while read -r FUNCTION_NAME CODE_SHA256; do
+            FINGERPRINT=$(echo "$CODE_SHA256" | base64 -d | od -An -tx1 | tr -d ' \n')
+            # shellcheck disable=SC2086
+            kosli attest artifact "$FUNCTION_NAME" \
+              --fingerprint "$FINGERPRINT" \
+              --name "lambda-$FUNCTION_NAME" \
+              $COMMIT_ARG
+          done
+
       - name: Kosli attest pull request
         if: inputs.kosli_template_file != '' && env.GH_TOKEN != ''
         run: |
