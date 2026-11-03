@@ -21,6 +21,18 @@ on:
       tf_apply:
         default: false
         type: boolean
+      checkov:
+        description: "When true, scan the plan JSON with Checkov after the plan, upload the report, attest it to Kosli (when kosli_template_file is set) and, unless checkov_soft_fail is true, fail the job on any finding. See the README on Checkov scanning."
+        default: false
+        type: boolean
+      checkov_soft_fail:
+        description: "When true, Checkov findings are reported in the job summary and attested to Kosli but do not fail the job. Set false to make findings block the plan or apply."
+        default: true
+        type: boolean
+      checkov_version:
+        description: "Version of Checkov to install."
+        default: "3.4.3"
+        type: string
       role_session_prefix:
         description: "Prefix for the AWS role session name, which CloudTrail records on every event the session makes. Defaults to apply or plan, from tf_apply. detect-drift passes detect-drift so its plans can be told apart from a PR plan of the same commit."
         default: ""
@@ -225,6 +237,71 @@ jobs:
           path: /tmp/${{ inputs.environment }}.plan.txt
           archive: false
 
+      # Checkov scans the plan JSON rather than the HCL: the plan has tfvars,
+      # variables and module inputs resolved, so each environment is scanned
+      # as it will actually be built. A plan with no changes still lists every
+      # planned resource, so the whole stack is scanned on every run.
+      - name: Checkov scan
+        if: inputs.checkov
+        working-directory: ${{ inputs.working_directory }}
+        env:
+          CHECKOV_VERSION: ${{ inputs.checkov_version }}
+          PLAN_JSON: /tmp/${{ inputs.environment }}.plan.json
+          REPORT_DIR: /tmp/checkov-${{ inputs.environment }}
+        run: |
+          tf show -json /tmp/${{ inputs.environment }}.tfplan > "$PLAN_JSON"
+          # Always --soft-fail here so the report is produced and attested
+          # whatever it says; the "Checkov gate" step decides whether the job
+          # fails. --quiet --compact keep the JSON, which Kosli caps at 1MB, to
+          # the failed checks without code blocks; the summary still counts
+          # every check, and the full text report is attached alongside it.
+          # Checkov reads .checkov.yaml from the working directory, and the
+          # enrichment maps each finding back to its HCL file and lines.
+          uvx --from "checkov==${CHECKOV_VERSION}" checkov \
+            --file "$PLAN_JSON" \
+            --framework terraform_plan \
+            --repo-root-for-plan-enrichment . \
+            --quiet --compact --soft-fail \
+            --output cli --output json \
+            --output-file-path "$REPORT_DIR"
+
+      - name: Checkov summary
+        if: inputs.checkov
+        id: checkov-summary
+        env:
+          REPORT_DIR: /tmp/checkov-${{ inputs.environment }}
+        run: |
+          # A scan that finds no resources emits only the summary counters at
+          # the top level, with no .summary key, so fall back to the top level.
+          report="$REPORT_DIR/results_json.json"
+          passed=$(jq '(.summary // .) | .passed' "$report")
+          failed=$(jq '(.summary // .) | .failed' "$report")
+          skipped=$(jq '(.summary // .) | .skipped' "$report")
+          parsing_errors=$(jq '(.summary // .) | .parsing_errors' "$report")
+          {
+            echo "### ${{ inputs.environment }} (checkov)"
+            echo "Passed: ${passed}, Failed: ${failed}, Skipped: ${skipped}, Parsing errors: ${parsing_errors}"
+            if [ "$failed" -gt 0 ] || [ "$parsing_errors" -gt 0 ]; then
+              echo '<details><summary>Findings</summary>'
+              echo
+              echo '```'
+              cat "$REPORT_DIR/results_cli.txt"
+              echo '```'
+              echo '</details>'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "failed=${failed}"
+            echo "parsing_errors=${parsing_errors}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload Checkov report
+        if: inputs.checkov
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: checkov-${{ inputs.environment }}
+          path: /tmp/checkov-${{ inputs.environment }}
+
       - name: Kosli create flow
         if: inputs.kosli_template_file != ''
         run: kosli create flow "$KOSLI_FLOW" --template-file "${{ inputs.kosli_template_file }}"
@@ -240,6 +317,42 @@ jobs:
         run: |
           # shellcheck disable=SC2086
           kosli attest generic --name terraform-plan --attachments /tmp/${{ inputs.environment }}.plan.txt $COMMIT_ARG
+
+      # The checkov custom attestation type (managed in terraform-kosli-app)
+      # evaluates the report, so the trail is non-compliant on any finding
+      # even when checkov_soft_fail keeps the job green.
+      - name: Kosli attest checkov
+        if: inputs.checkov && inputs.kosli_template_file != ''
+        env:
+          REPORT_DIR: /tmp/checkov-${{ inputs.environment }}
+        run: |
+          # shellcheck disable=SC2086
+          kosli attest custom \
+            --type checkov \
+            --name checkov \
+            --attestation-data "$REPORT_DIR/results_json.json" \
+            --attachments "$REPORT_DIR/results_cli.txt" \
+            $COMMIT_ARG
+
+      # Runs after the attestation so the report always reaches Kosli, and
+      # before the apply so a blocking finding stops the apply.
+      - name: Checkov gate
+        if: inputs.checkov
+        env:
+          SOFT_FAIL: ${{ inputs.checkov_soft_fail }}
+          FAILED: ${{ steps.checkov-summary.outputs.failed }}
+          PARSING_ERRORS: ${{ steps.checkov-summary.outputs.parsing_errors }}
+        run: |
+          if [ "$FAILED" -eq 0 ] && [ "$PARSING_ERRORS" -eq 0 ]; then
+            exit 0
+          fi
+          message="Checkov: ${FAILED} failed check(s) and ${PARSING_ERRORS} parsing error(s) in ${{ inputs.environment }}"
+          if [ "$SOFT_FAIL" = "true" ]; then
+            echo "::warning::${message}; not failing the job because checkov_soft_fail is true"
+            exit 0
+          fi
+          echo "::error::${message}"
+          exit 1
 
       - name: Apply
         shell: bash
