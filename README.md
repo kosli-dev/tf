@@ -102,6 +102,9 @@ Both `plan.yml` and `apply.yml` accept the same core inputs:
 | `tf_vars` | no | `""` | Extra env vars (one `KEY=VALUE` per line) exported before plan/apply; see [Supplying Terraform variables](#supplying-terraform-variables) |
 | `job_timeout_minutes` | no | `30` | Minutes before GitHub cancels the plan/apply job; see [Timeouts](#timeouts) |
 | `component_name` | no | `""` | Name of the thing being deployed; see [Component name](#component-name). Also accepted by `detect-drift.yml` |
+| `checkov` | no | `false` | Scan the plan with Checkov; see [Checkov scanning](#checkov-scanning) |
+| `checkov_soft_fail` | no | `true` | Report Checkov findings without failing the job; see [Checkov scanning](#checkov-scanning) |
+| `checkov_version` | no | `3.4.3` | Checkov version to install |
 
 Plus, for opting into Kosli attestation (see [Kosli attestation](#kosli-attestation) below):
 
@@ -239,13 +242,44 @@ every apply queued behind it.
 5. Runs `tf plan` (auto-init, auto-selects tfvars, saves binary plan)
 6. Runs `tf show` to produce a human-readable plan
 7. Uploads the plan as a `tfplan-<environment>` artifact
+8. If `checkov` is set, scans the plan with Checkov; see [Checkov scanning](#checkov-scanning)
 
 **Apply** (`apply.yml`):
-1. Steps 1–4 as above
+1. Steps 1–8 as above
 2. Runs `tf apply` (auto-init, auto-selects tfvars, auto-approves)
 3. Writes `drift.plan.json` (containing `{sha, drift: false}`) alongside the state file in S3,
    so the [drift-detection job][drift-doc] has a known-good baseline to compare against on its
    next run.
+
+### Checkov scanning
+
+Set the `checkov` input to `true` and both workflows scan the Terraform plan with
+[Checkov](https://www.checkov.io/) after it is produced. The scan runs against the plan JSON rather
+than the HCL, so tfvars, variables and module inputs are resolved and each environment is scanned
+as it will actually be built; a repository that plans six AWS accounts gets six scans, one per
+plan. A plan with no changes still lists every planned resource, so the whole stack is scanned on
+every run, not just the diff.
+
+Each run:
+
+* writes the counts to the job summary, with the findings in a collapsible block when there are any,
+* uploads the JSON and text reports as a `checkov-<environment>` artifact,
+* attests the report to Kosli when `kosli_template_file` is set (see below), and
+* fails the job on any failed check or parsing error, unless `checkov_soft_fail` is `true`.
+
+`checkov_soft_fail` defaults to `true` while Checkov is rolled out, so findings are visible in the
+job summary and in Kosli without blocking merges. Once a repository's findings are fixed or
+suppressed, set it to `false` and findings block the plan and the apply.
+
+Suppressions belong in a `.checkov.yaml` in the working directory, which Checkov reads
+automatically, or as `#checkov:skip=` comments on the resource. Findings are mapped back to the HCL
+file and line that defines the resource.
+
+Checkov needs no secrets, so it still runs on Dependabot pull requests, where the Kosli steps are
+disabled; only the attestation is skipped there.
+
+`detect-drift.yml` never runs Checkov: drift detection exists to spot out-of-band changes, and a
+scan result has no bearing on that.
 
 ### AWS role session name
 
@@ -277,6 +311,9 @@ Both workflows can optionally attest each Terraform run to Kosli.  This is opt-i
 * create the Kosli flow `terraform-plan-<environment>-<repo>` (or `terraform-apply-<environment>-<repo>`) from your template,
 * begin a trail named after the commit SHA being acted on,
 * attest the plan output (and, for apply, the apply log) as generic attestations,
+* when `checkov` is set, attest the Checkov report with the `checkov` custom attestation type
+  (managed in `terraform-kosli-app`), which Kosli evaluates so the trail is non-compliant on any
+  failed check or parsing error even while `checkov_soft_fail` keeps the job green,
 * in `apply.yml`, additionally attest the **state file** and the **drift plan** as artifacts so
   that any later out-of-band change to either file is detected as drift by the downstream
   [drift-detection job][drift-doc], and
@@ -301,6 +338,8 @@ trail:
       type: generic
     - name: terraform-apply
       type: generic
+    - name: checkov            # only when the checkov input is set
+      type: custom:checkov
   artifacts:
     - name: terraform-state
     - name: drift-plan

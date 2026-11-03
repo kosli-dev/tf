@@ -50,6 +50,18 @@ on:
       kosli_cli_version:
         default: "latest"
         type: string
+      checkov:
+        description: "When true, scan the plan JSON with Checkov after the plan, upload the report, attest it to Kosli (when kosli_template_file is set) and, unless checkov_soft_fail is true, fail the job on any finding. See the README on Checkov scanning."
+        default: false
+        type: boolean
+      checkov_soft_fail:
+        description: "When true, Checkov findings are reported in the job summary and attested to Kosli but do not fail the job. Set false to make findings block the plan or apply."
+        default: true
+        type: boolean
+      checkov_version:
+        description: "Version of Checkov to install."
+        default: "3.4.3"
+        type: string
       job_timeout_minutes:
         description: "Minutes before GitHub cancels the plan job. Raise it together with aws_role_duration when a legitimate plan needs longer; see the README on timeouts."
         default: 30
@@ -80,6 +92,9 @@ jobs:
       tf_version: ${{ inputs.tf_version }}
       environment: ${{ inputs.environment }}
       tf_apply: false
+      checkov: ${{ inputs.checkov }}
+      checkov_soft_fail: ${{ inputs.checkov_soft_fail }}
+      checkov_version: ${{ inputs.checkov_version }}
       github_repository_to_checkout: ${{ inputs.github_repository_to_checkout }}
       ref: ${{ inputs.ref }}
       tf_vars: ${{ inputs.tf_vars }}

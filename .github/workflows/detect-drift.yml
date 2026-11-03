@@ -117,6 +117,9 @@ jobs:
       environment: ${{ inputs.environment }}
       ref: ${{ needs.fetch-baseline.outputs.sha }}
       tf_apply: false
+      # Checkov is deliberately left at its default (off) here: drift
+      # detection exists to spot out-of-band changes, and a scan result has
+      # no bearing on that.
       role_session_prefix: detect-drift
       tf_vars: ${{ inputs.tf_vars }}
       component_name: ${{ inputs.component_name }}
