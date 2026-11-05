@@ -248,6 +248,8 @@ jobs:
           CHECKOV_VERSION: ${{ inputs.checkov_version }}
           PLAN_JSON: /tmp/${{ inputs.environment }}.plan.json
           REPORT_DIR: /tmp/checkov-${{ inputs.environment }}
+          REPORT_TXT: /tmp/${{ inputs.environment }}.checkov.txt
+          REPORT_JSON: /tmp/${{ inputs.environment }}.checkov.json
         run: |
           tf show -json /tmp/${{ inputs.environment }}.tfplan > "$PLAN_JSON"
           # Always --soft-fail here so the report is produced and attested
@@ -264,20 +266,25 @@ jobs:
             --quiet --compact --soft-fail \
             --output cli --output json \
             --output-file-path "$REPORT_DIR"
+          # Checkov names its reports results_cli.txt and results_json.json.
+          # Rename them to match the plan files, so each is uploaded as its own
+          # artifact with a unique name across the environment matrix.
+          mv "$REPORT_DIR/results_cli.txt" "$REPORT_TXT"
+          mv "$REPORT_DIR/results_json.json" "$REPORT_JSON"
 
       - name: Checkov summary
         if: inputs.checkov
         id: checkov-summary
         env:
-          REPORT_DIR: /tmp/checkov-${{ inputs.environment }}
+          REPORT_TXT: /tmp/${{ inputs.environment }}.checkov.txt
+          REPORT_JSON: /tmp/${{ inputs.environment }}.checkov.json
         run: |
           # A scan that finds no resources emits only the summary counters at
           # the top level, with no .summary key, so fall back to the top level.
-          report="$REPORT_DIR/results_json.json"
-          passed=$(jq '(.summary // .) | .passed' "$report")
-          failed=$(jq '(.summary // .) | .failed' "$report")
-          skipped=$(jq '(.summary // .) | .skipped' "$report")
-          parsing_errors=$(jq '(.summary // .) | .parsing_errors' "$report")
+          passed=$(jq '(.summary // .) | .passed' "$REPORT_JSON")
+          failed=$(jq '(.summary // .) | .failed' "$REPORT_JSON")
+          skipped=$(jq '(.summary // .) | .skipped' "$REPORT_JSON")
+          parsing_errors=$(jq '(.summary // .) | .parsing_errors' "$REPORT_JSON")
           {
             echo "### ${{ inputs.environment }} (checkov)"
             echo "Passed: ${passed}, Failed: ${failed}, Skipped: ${skipped}, Parsing errors: ${parsing_errors}"
@@ -285,7 +292,7 @@ jobs:
               echo '<details><summary>Findings</summary>'
               echo
               echo '```'
-              cat "$REPORT_DIR/results_cli.txt"
+              cat "$REPORT_TXT"
               echo '```'
               echo '</details>'
             fi
@@ -295,12 +302,22 @@ jobs:
             echo "parsing_errors=${parsing_errors}"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Upload Checkov report
+      # Uploaded unarchived, like the plan, so the reports open in the browser
+      # from the run page instead of downloading as a zip. With archive: false
+      # the file name is the artifact name, so each must be a single file.
+      - name: Upload Checkov text report
         if: inputs.checkov
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
-          name: checkov-${{ inputs.environment }}
-          path: /tmp/checkov-${{ inputs.environment }}
+          path: /tmp/${{ inputs.environment }}.checkov.txt
+          archive: false
+
+      - name: Upload Checkov JSON report
+        if: inputs.checkov
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          path: /tmp/${{ inputs.environment }}.checkov.json
+          archive: false
 
       - name: Kosli create flow
         if: inputs.kosli_template_file != ''
@@ -324,14 +341,15 @@ jobs:
       - name: Kosli attest checkov
         if: inputs.checkov && inputs.kosli_template_file != ''
         env:
-          REPORT_DIR: /tmp/checkov-${{ inputs.environment }}
+          REPORT_TXT: /tmp/${{ inputs.environment }}.checkov.txt
+          REPORT_JSON: /tmp/${{ inputs.environment }}.checkov.json
         run: |
           # shellcheck disable=SC2086
           kosli attest custom \
             --type checkov \
             --name checkov \
-            --attestation-data "$REPORT_DIR/results_json.json" \
-            --attachments "$REPORT_DIR/results_cli.txt" \
+            --attestation-data "$REPORT_JSON" \
+            --attachments "$REPORT_TXT" \
             $COMMIT_ARG
 
       # Runs after the attestation so the report always reaches Kosli, and

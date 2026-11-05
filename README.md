@@ -241,7 +241,7 @@ every apply queued behind it.
 4. Configures AWS credentials via OIDC
 5. Runs `tf plan` (auto-init, auto-selects tfvars, saves binary plan)
 6. Runs `tf show` to produce a human-readable plan
-7. Uploads the plan as a `tfplan-<environment>` artifact
+7. Uploads the plan as an `<environment>.plan.txt` artifact
 8. If `checkov` is set, scans the plan with Checkov; see [Checkov scanning](#checkov-scanning)
 
 **Apply** (`apply.yml`):
@@ -263,7 +263,8 @@ every run, not just the diff.
 Each run:
 
 * writes the counts to the job summary, with the findings in a collapsible block when there are any,
-* uploads the JSON and text reports as a `checkov-<environment>` artifact,
+* uploads the text and JSON reports as the `<environment>.checkov.txt` and
+  `<environment>.checkov.json` artifacts, unarchived so they open in the browser like the plan,
 * attests the report to Kosli when `kosli_template_file` is set (see below), and
 * fails the job on any failed check or parsing error, unless `checkov_soft_fail` is `true`.
 
