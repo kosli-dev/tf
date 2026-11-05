@@ -386,6 +386,37 @@ called job's `permissions:`, so both sides must grant `pull-requests: read` or t
 step fails with `Resource not accessible by integration`. Omit both if you don't need
 pull-request attestation — the step is skipped when `kosli_github_token` is not passed.
 
+### Attesting Lambda functions from another apply workflow
+
+A repository that applies with a workflow other than `apply.yml` can attest its Lambda functions
+with `attest-lambda-functions.yml`. It takes the state file as a GitHub artifact, attests each
+zip-packaged function as `apply.yml` does, to a trail named after the commit in flow
+`terraform-apply-<environment>-<component or repo>`, created with an empty template.
+
+With `fivexl/gh-workflow-tf-plan-apply`, the apply job uploads the state. In a matrix, give each
+entry its own `tf_upload_artifact_name_suffix`, since artifact names are unique per run:
+
+```yaml
+jobs:
+  apply:
+    uses: fivexl/gh-workflow-tf-plan-apply/.github/workflows/base.yml@v0.0.28
+    with:
+      # ...
+      tf_upload_artifact_state_file: "true"
+      tf_state_file_dir_on_s3: terraform/my-repo
+      tf_state_file_name: main.tfstate
+
+  attest-lambda-functions:
+    needs: [apply]
+    uses: kosli-dev/tf/.github/workflows/attest-lambda-functions.yml@main
+    with:
+      environment: prod
+      state_artifact_name: tf_artifacts_state_file
+      kosli_host: "https://staging.app.kosli.com,https://app.kosli.com"
+    secrets:
+      kosli_api_token: "${{ secrets.KOSLI_API_TOKEN_STAGING }},${{ secrets.KOSLI_API_TOKEN_PROD }}"
+```
+
 [drift-doc]: https://github.com/kosli-dev/knowledge-base/blob/main/drift-detection.md
 
 ## Configuration

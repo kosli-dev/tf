@@ -1,0 +1,32 @@
+name: Attest Lambda functions
+description: >-
+  Attest each zip-packaged Lambda function in a Terraform state file to the current Kosli trail,
+  with the fingerprint a Kosli Lambda environment reports for it.
+inputs:
+  state_file:
+    description: "Path to the Terraform state file."
+    required: true
+runs:
+  using: composite
+  steps:
+    # A Lambda environment fingerprints a zip-packaged function by its CodeSha256, which the
+    # state holds base64-encoded as code_sha256. An image-packaged function is left to the
+    # pipeline that builds its image. KOSLI_* and COMMIT_ARG come from the caller's env.
+    - shell: bash
+      env:
+        STATE_FILE: ${{ inputs.state_file }}
+      run: |
+        jq -r '.resources[]
+               | select(.mode == "managed" and .type == "aws_lambda_function")
+               | .instances[].attributes
+               | select(.package_type == "Zip")
+               | "\(.function_name) \(.code_sha256)"' \
+          "$STATE_FILE" |
+        while read -r FUNCTION_NAME CODE_SHA256; do
+          FINGERPRINT=$(echo "$CODE_SHA256" | base64 -d | od -An -tx1 | tr -d ' \n')
+          # shellcheck disable=SC2086
+          kosli attest artifact "$FUNCTION_NAME" \
+            --fingerprint "$FINGERPRINT" \
+            --name "lambda-$FUNCTION_NAME" \
+            ${COMMIT_ARG:-}
+        done

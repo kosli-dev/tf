@@ -1,0 +1,73 @@
+name: Attest Lambda functions
+
+# For a caller that applies with a workflow other than apply.yml, and uploads the state it
+# applied as a GitHub artifact. Each zip-packaged Lambda function in that state is attested to
+# a trail named after the commit, in the flow apply.yml would use.
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      component_name:
+        description: "Name of the thing being deployed, used in the Kosli flow name. Empty uses the repository name."
+        default: ""
+        type: string
+      state_artifact_name:
+        description: "Name of the GitHub artifact holding the state file."
+        required: true
+        type: string
+      state_file_name:
+        description: "Name of the state file inside the artifact."
+        default: "main.tfstate"
+        type: string
+      kosli_host:
+        default: "https://app.kosli.com"
+        type: string
+      kosli_org:
+        default: "kosli"
+        type: string
+      kosli_cli_version:
+        default: "latest"
+        type: string
+    secrets:
+      kosli_api_token:
+        required: true
+
+jobs:
+  attest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      KOSLI_ORG: ${{ inputs.kosli_org }}
+      KOSLI_HOST: ${{ inputs.kosli_host }}
+      KOSLI_API_TOKEN: ${{ secrets.kosli_api_token }}
+      KOSLI_FLOW: terraform-apply-${{ inputs.environment }}-${{ inputs.component_name || github.event.repository.name }}
+      KOSLI_TRAIL: ${{ github.sha }}
+    steps:
+      - name: Download state file
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.state_artifact_name }}
+          path: /tmp/state
+
+      - name: Setup Kosli CLI
+        uses: kosli-dev/setup-cli-action@060e7f9bf6ac246743d6a62c5df847dfe7050867 # v5.2.1
+        with:
+          version: ${{ inputs.kosli_cli_version }}
+
+      # The trail holds only the functions, and an artifact's compliance follows its trail's,
+      # so the template declares nothing.
+      - name: Kosli create flow
+        run: kosli create flow "$KOSLI_FLOW" --use-empty-template
+
+      - name: Kosli begin trail
+        run: kosli begin trail "$KOSLI_TRAIL"
+
+      - name: Kosli attest Lambda functions
+        uses: kosli-dev/tf/attest-lambda-functions@main
+        with:
+          state_file: /tmp/state/${{ inputs.state_file_name }}
