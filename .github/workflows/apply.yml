@@ -206,8 +206,9 @@ jobs:
           kosli attest artifact /tmp/drift.plan.json --artifact-type file --name drift-plan $COMMIT_ARG
 
       # A Lambda environment fingerprints a zip-packaged function by its CodeSha256, which
-      # the state holds base64-encoded as code_sha256. An image-packaged function is left to
-      # the pipeline that builds its image.
+      # the state holds base64-encoded as code_sha256. AWS provider versions before 5.51 have no
+      # code_sha256 and store CodeSha256 in source_code_hash. An image-packaged function is
+      # left to the pipeline that builds its image.
       - name: Kosli attest Lambda functions
         if: inputs.kosli_template_file != ''
         run: |
@@ -215,9 +216,13 @@ jobs:
                  | select(.mode == "managed" and .type == "aws_lambda_function")
                  | .instances[].attributes
                  | select(.package_type == "Zip")
-                 | "\(.function_name) \(.code_sha256)"' \
+                 | "\(.function_name) \(.code_sha256 // .source_code_hash // "")"' \
             "/tmp/${{ inputs.tf_state_file_name }}" |
           while read -r FUNCTION_NAME CODE_SHA256; do
+            if [ -z "$CODE_SHA256" ]; then
+              echo "::error::Lambda function $FUNCTION_NAME has neither code_sha256 nor source_code_hash in the state"
+              exit 1
+            fi
             FINGERPRINT=$(echo "$CODE_SHA256" | base64 -d | od -An -tx1 | tr -d ' \n')
             # shellcheck disable=SC2086
             kosli attest artifact "$FUNCTION_NAME" \
