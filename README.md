@@ -68,7 +68,7 @@ plan:
   permissions:
     id-token: write
     contents: write
-  uses: kosli-dev/tf/.github/workflows/plan.yml@main
+  uses: kosli-dev/tf/.github/workflows/plan.yml@v2.0.0
   strategy:
     fail-fast: false
     matrix:
@@ -84,7 +84,7 @@ plan:
 To apply instead of plan, use `apply.yml`:
 
 ```yaml
-  uses: kosli-dev/tf/.github/workflows/apply.yml@main
+  uses: kosli-dev/tf/.github/workflows/apply.yml@v2.0.0
 ```
 
 ### Workflow inputs
@@ -98,7 +98,7 @@ Both `plan.yml` and `apply.yml` accept the same core inputs:
 | `aws_role_arn` | yes | | IAM role ARN for OIDC authentication |
 | `aws_role_duration` | no | `1200` | Role session duration in seconds |
 | `working_directory` | no | `./` | Directory containing Terraform config |
-| `tf_version` | no | `1.14.6` | Terraform version to install |
+| `tf_version` | no | `1.17.1` | Terraform version to install |
 | `tf_vars` | no | `""` | Extra env vars (one `KEY=VALUE` per line) exported before plan/apply; see [Supplying Terraform variables](#supplying-terraform-variables) |
 | `job_timeout_minutes` | no | `30` | Minutes before GitHub cancels the plan/apply job; see [Timeouts](#timeouts) |
 | `component_name` | no | `""` | Name of the thing being deployed; see [Component name](#component-name). Also accepted by `detect-drift.yml` |
