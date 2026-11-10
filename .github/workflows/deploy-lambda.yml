@@ -1,0 +1,103 @@
+name: Deploy Lambda
+
+on:
+  workflow_call:
+    inputs:
+      s3_key:
+        description: "Key of the package in package_bucket, from build-lambda.yml."
+        required: true
+        type: string
+      fingerprint:
+        description: "SHA-256 the package must have, from build-lambda.yml."
+        required: true
+        type: string
+      function_name:
+        required: true
+        type: string
+      environments:
+        description: "Account types to deploy to, as terraform-deploy-matrix selects them, e.g. '\"staging\"' or '\"production\"'."
+        required: true
+        type: string
+      github_environment:
+        description: "GitHub environment whose protection rules, such as a required reviewer, must pass before any account is deployed to. Empty deploys without one."
+        default: ""
+        type: string
+      role_name:
+        description: "IAM role assumed in each account. It needs lambda:UpdateFunctionCode and lambda:GetFunction on the function, and s3:GetObject on package_bucket. Defaults to the caller's repository name."
+        default: ${{ github.event.repository.name }}
+        type: string
+      package_bucket:
+        default: "lambda-packages-dacef8339fbd41ce31c346f854a85d0c74f7c4e8"
+        type: string
+
+jobs:
+  accounts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      json: ${{ steps.matrix.outputs.json }}
+    steps:
+      - id: matrix
+        uses: kosli-dev/terraform-deploy-matrix@main
+        with:
+          environments: ${{ inputs.environments }}
+
+  # One approval covers every account of the environments, rather than one per
+  # matrix job.
+  approval:
+    if: inputs.github_environment != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: ${{ inputs.github_environment }}
+    steps:
+      - run: echo "Approved deploying ${{ inputs.fingerprint }} to ${{ inputs.function_name }}"
+
+  deploy:
+    name: Deploy to ${{ matrix.name }}
+    needs: [accounts, approval]
+    if: ${{ !cancelled() && needs.accounts.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.approval.result) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      id-token: write
+      contents: read
+    strategy:
+      # Each account is deployed on its own, and one failing says nothing about
+      # the rest.
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.accounts.outputs.json) }}
+    env:
+      FUNCTION_NAME: ${{ inputs.function_name }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+        with:
+          role-to-assume: arn:aws:iam::${{ matrix.aws_account_id }}:role/${{ inputs.role_name }}
+          aws-region: ${{ matrix.aws_region }}
+          role-session-name: ${{ inputs.role_name }}
+          action-timeout-s: 45
+          retry-max-attempts: 3
+
+      # The package is passed to Lambda as bytes, so Lambda never reads the
+      # bucket, which is in eu-central-1 whatever region the function is in.
+      - name: Download and check the package
+        env:
+          BUCKET: ${{ inputs.package_bucket }}
+          KEY: ${{ inputs.s3_key }}
+          FINGERPRINT: ${{ inputs.fingerprint }}
+        run: |
+          aws s3 cp --region eu-central-1 "s3://$BUCKET/$KEY" package.zip
+          actual=$(sha256sum package.zip | cut -d' ' -f1)
+          [ "$actual" = "$FINGERPRINT" ] \
+            || { echo "::error::s3://$BUCKET/$KEY is $actual, expected $FINGERPRINT"; exit 1; }
+
+      - name: Swap the function's code
+        run: aws lambda update-function-code
+          --function-name "$FUNCTION_NAME"
+          --zip-file fileb://package.zip
+          --publish
+          --no-cli-pager
+
+      - name: Wait for the function to become active
+        run: aws lambda wait function-updated-v2 --function-name "$FUNCTION_NAME"
