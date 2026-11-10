@@ -1,0 +1,339 @@
+name: Build Lambda
+
+on:
+  workflow_call:
+    inputs:
+      package_name:
+        description: "Name of the package, used for the S3 key and the Kosli flow. One package can run as several functions, so this is not the function name."
+        required: true
+        type: string
+      source_path:
+        description: "Directory (in the caller repo) zipped into the package. A uv.lock or requirements.txt in it is installed into the package."
+        required: true
+        type: string
+      python_version:
+        description: "Python version of the Lambda runtime, e.g. 3.14. Dependencies are installed for it."
+        required: true
+        type: string
+      bundle_kosli_cli:
+        description: "When true, put the Kosli CLI binary at the root of the package."
+        default: false
+        type: boolean
+      bundled_kosli_cli_version:
+        description: "Kosli CLI release to bundle: a major version (2), resolved to its newest release, or an exact one (2.18.0). Used only when bundle_kosli_cli is true."
+        default: "2"
+        type: string
+      controls:
+        description: "JSON array of the SDLC controls to evaluate. Leave SDLC-CTRL-0008 out for code with no tests of ours, such as a third-party module."
+        default: '["SDLC-CTRL-0002", "SDLC-CTRL-0004", "SDLC-CTRL-0007", "SDLC-CTRL-0008"]'
+        type: string
+      package_bucket:
+        description: "S3 bucket, in the dev account, the package is uploaded to."
+        default: "lambda-packages-dacef8339fbd41ce31c346f854a85d0c74f7c4e8"
+        type: string
+      kosli_host:
+        default: "https://app.kosli.com"
+        type: string
+      kosli_org:
+        default: "kosli"
+        type: string
+      kosli_cli_version:
+        description: "Kosli CLI version this workflow runs, not the one bundled."
+        default: "latest"
+        type: string
+    secrets:
+      kosli_api_token:
+        required: true
+      kosli_github_token:
+        description: "GitHub token used by `kosli attest pullrequest github`. Cannot be named `github_token` because that name is reserved by `workflow_call`."
+        required: true
+      policies_token:
+        description: "Token that reads kosli-dev/sdlc-policies, passed to evaluate-policy.yml."
+        required: true
+    outputs:
+      s3_key:
+        description: "Key of the package in package_bucket."
+        value: ${{ jobs.build.outputs.s3_key }}
+      fingerprint:
+        description: "SHA-256 of the package, as Kosli and the Lambda environment fingerprint it."
+        value: ${{ jobs.build.outputs.fingerprint }}
+      kosli_flow:
+        value: ${{ jobs.build.outputs.kosli_flow }}
+      kosli_trail:
+        value: ${{ jobs.build.outputs.kosli_trail }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: read
+    outputs:
+      s3_key: ${{ steps.upload.outputs.s3_key }}
+      fingerprint: ${{ steps.package.outputs.fingerprint }}
+      params: ${{ steps.params.outputs.json }}
+      kosli_flow: ${{ env.KOSLI_FLOW }}
+      kosli_trail: ${{ env.KOSLI_TRAIL }}
+    env:
+      KOSLI_ORG: ${{ inputs.kosli_org }}
+      KOSLI_HOST: ${{ inputs.kosli_host }}
+      KOSLI_API_TOKEN: ${{ secrets.kosli_api_token }}
+      KOSLI_FLOW: ${{ github.event.repository.name }}-${{ inputs.package_name }}
+      KOSLI_TRAIL: ${{ github.sha }}
+      SOURCE_PATH: ${{ inputs.source_path }}
+      PYTHON_VERSION: ${{ inputs.python_version }}
+      # Fixed timestamps and file order make the zip byte-for-byte reproducible,
+      # so a re-run builds the same fingerprint the bucket already holds.
+      SOURCE_DATE_EPOCH: "315532800"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ inputs.python_version }}
+
+      - name: Install uv
+        run: pip install --quiet uv==0.9.5
+
+      # requirements-lock.txt is both what gets installed and what SDLC-CTRL-0004
+      # reads as the lockfile: name==version lines with --hash=.
+      - name: Resolve the dependencies
+        run: |
+          if [ -f "$SOURCE_PATH/uv.lock" ]; then
+            uv export --project "$SOURCE_PATH" --frozen --no-dev --no-emit-project \
+              --format requirements-txt --output-file requirements-lock.txt
+          elif [ -f "$SOURCE_PATH/requirements.txt" ]; then
+            cp "$SOURCE_PATH/requirements.txt" requirements-lock.txt
+          else
+            : > requirements-lock.txt
+          fi
+
+      # Wheels for the Lambda platform rather than the runner's, so no build runs
+      # in Docker. --no-compile keeps .pyc files, which embed timestamps, out of
+      # the package.
+      - name: Install the dependencies into the package
+        run: |
+          echo "BUILD_DIR=$RUNNER_TEMP/package" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/package"
+          if [ -s requirements-lock.txt ]; then
+            pip install --quiet --no-compile --no-deps \
+              --target "$RUNNER_TEMP/package" \
+              --platform manylinux2014_x86_64 --implementation cp \
+              --python-version "$PYTHON_VERSION" --only-binary=:all: \
+              -r requirements-lock.txt
+          fi
+
+      - name: Copy the source into the package
+        run: |
+          rsync -a \
+            --exclude 'test_*.py' --exclude 'conftest.py' \
+            --exclude 'pyproject.toml' --exclude 'uv.lock' \
+            --exclude 'requirements*.txt' \
+            --exclude '.venv' --exclude '__pycache__' --exclude '.pytest_cache' \
+            "$SOURCE_PATH/" "$BUILD_DIR/"
+
+      - name: Bundle the Kosli CLI
+        if: inputs.bundle_kosli_cli
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLI_VERSION_INPUT: ${{ inputs.bundled_kosli_cli_version }}
+        run: |
+          requested="${CLI_VERSION_INPUT#v}"
+          if [[ "$requested" =~ ^[0-9]+$ ]]; then
+            tag=$(gh api repos/kosli-dev/cli/releases --paginate \
+              --jq "[.[] | select(.prerelease | not) | .tag_name | select(startswith(\"v$requested.\"))][0]" | head -1)
+          else
+            tag="v$requested"
+          fi
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+            || { echo "::error::No Kosli CLI release matches '$CLI_VERSION_INPUT'"; exit 1; }
+          version="${tag#v}"
+          curl -fsSL -o kosli.tar.gz \
+            "https://github.com/kosli-dev/cli/releases/download/$tag/kosli_${version}_linux_amd64.tar.gz"
+          tar -xzf kosli.tar.gz -C "$BUILD_DIR" kosli
+          echo "Bundled Kosli CLI $tag" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Zip the package
+        id: package
+        run: |
+          find "$BUILD_DIR" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
+          (cd "$BUILD_DIR" && find . -mindepth 1 -print | LC_ALL=C sort | zip -q -X -@ "$RUNNER_TEMP/package.zip")
+          fingerprint=$(sha256sum "$RUNNER_TEMP/package.zip" | cut -d' ' -f1)
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+          echo "Package fingerprint: $fingerprint" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run the tests
+        id: tests
+        run: |
+          mkdir -p "$RUNNER_TEMP/junit"
+          if [ -z "$(find "$SOURCE_PATH" -maxdepth 1 -name 'test_*.py' -print -quit)" ]; then
+            echo "ran=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -f "$SOURCE_PATH/uv.lock" ]; then
+            (cd "$SOURCE_PATH" && uv run --frozen --with pytest pytest --junitxml="$RUNNER_TEMP/junit/results.xml")
+          else
+            for f in requirements.txt requirements-test.txt; do
+              if [ -f "$SOURCE_PATH/$f" ]; then pip install --quiet -r "$SOURCE_PATH/$f"; fi
+            done
+            pip install --quiet pytest
+            (cd "$SOURCE_PATH" && python -m pytest --junitxml="$RUNNER_TEMP/junit/results.xml")
+          fi
+          echo "ran=true" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+        with:
+          role-to-assume: arn:aws:iam::772819027869:role/lambda-package-publisher
+          aws-region: eu-central-1
+          role-session-name: ${{ github.event.repository.name }}-${{ inputs.package_name }}
+          action-timeout-s: 45
+          retry-max-attempts: 3
+
+      # The bucket refuses a write that could replace a key. A re-run builds the
+      # same bytes, so an existing key is accepted when its checksum matches.
+      - name: Upload the package
+        id: upload
+        env:
+          BUCKET: ${{ inputs.package_bucket }}
+          FINGERPRINT: ${{ steps.package.outputs.fingerprint }}
+        run: |
+          key="${GITHUB_REPOSITORY#*/}/${{ inputs.package_name }}/$GITHUB_SHA.zip"
+          echo "s3_key=$key" >> "$GITHUB_OUTPUT"
+          if aws s3api put-object --bucket "$BUCKET" --key "$key" \
+               --body "$RUNNER_TEMP/package.zip" --if-none-match '*' \
+               --checksum-algorithm SHA256 > /dev/null 2> put.err; then
+            exit 0
+          fi
+          grep -q PreconditionFailed put.err || { cat put.err; exit 1; }
+          stored=$(aws s3api head-object --bucket "$BUCKET" --key "$key" \
+            --checksum-mode ENABLED --query ChecksumSHA256 --output text |
+            base64 -d | od -An -tx1 | tr -d ' \n')
+          [ "$stored" = "$FINGERPRINT" ] \
+            || { echo "::error::s3://$BUCKET/$key holds $stored, but this build is $FINGERPRINT"; exit 1; }
+
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        id: syft
+        with:
+          syft-version: v1.54.1
+
+      # Of the installed package directory, whose dist-info records each
+      # dependency's version and licence.
+      - name: Generate the SBOM
+        run: |
+          "${{ steps.syft.outputs.cmd }}" -q "dir:$BUILD_DIR" -o cyclonedx-json=sbom.json
+          jq -e '{components: [(.components // [])[] | {name, version, purl, licenses}]}' sbom.json > sbom-components.json
+          jq -Rs '{content: .}' requirements-lock.txt > requirements-lock.json
+
+      - uses: kosli-dev/setup-cli-action@060e7f9bf6ac246743d6a62c5df847dfe7050867 # v5.2.1
+        with:
+          version: ${{ inputs.kosli_cli_version }}
+
+      - name: Create the flow and begin the trail
+        env:
+          WITH_TESTS: ${{ contains(fromJSON(inputs.controls), 'SDLC-CTRL-0008') }}
+        run: |
+          {
+            echo "version: 1"
+            echo "trail:"
+            echo "  artifacts:"
+            echo "    - name: artifact"
+            echo "      attestations:"
+            echo "        - {name: pull-request, type: pull_request}"
+            if [ "$WITH_TESTS" = "true" ]; then
+              echo "        - {name: unit-test-junit, type: junit}"
+            fi
+            echo "        - {name: requirements-lock, type: 'custom:kosli-dependency-lock'}"
+            echo "        - {name: sbom, type: sbom}"
+            echo "        - {name: sbom-components, type: 'custom:kosli-dependency-sbom-components'}"
+            echo "        - {name: runtime, type: 'custom:kosli-dependency-runtime'}"
+          } > "$RUNNER_TEMP/flow-template.yml"
+          # A flow whose template names a type the org lacks cannot be created;
+          # creating a type is an upsert.
+          kosli create attestation-type kosli-dependency-runtime \
+            --description "The Lambda runtime a zip package was built for"
+          kosli create flow "$KOSLI_FLOW" \
+            --description "Lambda package ${{ inputs.package_name }} from $GITHUB_REPOSITORY" \
+            --template-file "$RUNNER_TEMP/flow-template.yml"
+          kosli begin trail "$KOSLI_TRAIL" --template-file "$RUNNER_TEMP/flow-template.yml"
+
+      - name: Attest the package
+        run: kosli attest artifact "$RUNNER_TEMP/package.zip"
+          --artifact-type file
+          --name artifact
+
+      - name: Attest the pull request
+        env:
+          KOSLI_GITHUB_TOKEN: ${{ secrets.kosli_github_token }}
+          FINGERPRINT: ${{ steps.package.outputs.fingerprint }}
+        run: kosli attest pullrequest github
+          --name pull-request
+          --fingerprint "$FINGERPRINT"
+
+      - name: Attest the test results
+        if: steps.tests.outputs.ran == 'true'
+        env:
+          FINGERPRINT: ${{ steps.package.outputs.fingerprint }}
+        run: kosli attest junit
+          --name unit-test-junit
+          --fingerprint "$FINGERPRINT"
+          --results-dir "$RUNNER_TEMP/junit"
+
+      - name: Attest the dependencies
+        env:
+          FINGERPRINT: ${{ steps.package.outputs.fingerprint }}
+        run: |
+          kosli attest custom --fingerprint "$FINGERPRINT" \
+            --type kosli-dependency-lock --name requirements-lock \
+            --attestation-data requirements-lock.json --attachments requirements-lock.txt
+          kosli attest sbom --fingerprint "$FINGERPRINT" \
+            --name sbom --sbom-file sbom.json
+          kosli attest custom --fingerprint "$FINGERPRINT" \
+            --type kosli-dependency-sbom-components --name sbom-components \
+            --attestation-data sbom-components.json
+
+      # The runtime is the package's base, as a base image is an image's: it
+      # supplies the interpreter the package was built for.
+      - name: Attest the runtime
+        env:
+          FINGERPRINT: ${{ steps.package.outputs.fingerprint }}
+        run: |
+          jq -n --arg runtime "python$PYTHON_VERSION" '{content: $runtime}' > runtime.json
+          kosli attest custom --fingerprint "$FINGERPRINT" \
+            --type kosli-dependency-runtime --name runtime \
+            --attestation-data runtime.json
+
+      # evaluate-policy.yml refuses params for a control it is not asked to
+      # evaluate, so SDLC-CTRL-0008's are passed only when it is.
+      - name: Compose the control params
+        id: params
+        env:
+          CONTROLS: ${{ inputs.controls }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          params=$(jq -c --arg branch "$DEFAULT_BRANCH" '
+            {"SDLC-CTRL-0007": {protected_branch: $branch},
+             "SDLC-CTRL-0008": {test_attestation_names: ["unit-test-junit"]}}
+            | with_entries(select(.key as $c | $ARGS.named.controls | index($c)))' \
+            --argjson controls "$CONTROLS")
+          echo "json=$params" >> "$GITHUB_OUTPUT"
+
+  attest-control-decisions:
+    needs: [build]
+    # The controls' params are read at this pin, but each policy runs at the
+    # version currently published in Kosli.
+    uses: kosli-dev/sdlc-policies/.github/workflows/evaluate-policy.yml@3dd1d7e6f84e65074474accdb043427ae15dec71
+    with:
+      controls: ${{ inputs.controls }}
+      params: ${{ needs.build.outputs.params }}
+      variants: '{"SDLC-CTRL-0004": "zip"}'
+      trail: ${{ needs.build.outputs.kosli_trail }}
+      flow: ${{ needs.build.outputs.kosli_flow }}
+      fingerprint: ${{ needs.build.outputs.fingerprint }}
+      org: ${{ inputs.kosli_org }}
+      host: ${{ inputs.kosli_host }}
+    secrets:
+      api_token: ${{ secrets.kosli_api_token }}
+      policies_token: ${{ secrets.policies_token }}
