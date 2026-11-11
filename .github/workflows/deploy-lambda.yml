@@ -116,7 +116,7 @@ jobs:
               | jq -r '[.. | objects | .git_commit? | strings][0] // empty' || true)
           fi
 
-          short() { printf '`%s`' "${1:0:12}"; }
+          short() { printf "\`%s\`" "${1:0:12}"; }
           trail_url="$KOSLI_HOST/$KOSLI_ORG/flows/$KOSLI_FLOW/trails/$NEW_COMMIT"
           {
             echo "### $FUNCTION_NAME in $ACCOUNT ($REGION)"
