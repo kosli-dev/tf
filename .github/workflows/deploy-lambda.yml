@@ -29,6 +29,27 @@ on:
       package_bucket:
         default: "lambda-packages-dacef8339fbd41ce31c346f854a85d0c74f7c4e8"
         type: string
+      kosli_flow:
+        description: "Kosli flow of the package, from build-lambda.yml. With kosli_trail and the kosli_api_token secret, the plan names the commit each account runs."
+        default: ""
+        type: string
+      kosli_trail:
+        description: "Kosli trail of the package, from build-lambda.yml: the commit it was built from."
+        default: ""
+        type: string
+      kosli_host:
+        default: "https://app.kosli.com"
+        type: string
+      kosli_org:
+        default: "kosli"
+        type: string
+      kosli_cli_version:
+        default: "latest"
+        type: string
+    secrets:
+      kosli_api_token:
+        description: "Reads the flow, to find the commit of the code each account runs. Without it the plan shows fingerprints only."
+        required: false
 
 jobs:
   accounts:
@@ -42,20 +63,90 @@ jobs:
         with:
           environments: ${{ inputs.environments }}
 
-  # One approval covers every account of the environments, rather than one per
-  # matrix job.
-  approval:
-    if: inputs.github_environment != ''
+  # What each account runs and what it will run, in the job summary, so a
+  # reviewer of the deploy sees it before approving.
+  plan:
+    name: Plan for ${{ matrix.name }}
+    needs: accounts
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    environment: ${{ inputs.github_environment }}
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.accounts.outputs.json) }}
+    env:
+      FUNCTION_NAME: ${{ inputs.function_name }}
+      FINGERPRINT: ${{ inputs.fingerprint }}
+      ACCOUNT: ${{ matrix.name }}
+      REGION: ${{ matrix.aws_region }}
+      KOSLI_ORG: ${{ inputs.kosli_org }}
+      KOSLI_HOST: ${{ inputs.kosli_host }}
+      KOSLI_API_TOKEN: ${{ secrets.kosli_api_token }}
+      KOSLI_FLOW: ${{ inputs.kosli_flow }}
+      NEW_COMMIT: ${{ inputs.kosli_trail }}
+      REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
     steps:
-      - run: echo "Approved deploying ${{ inputs.fingerprint }} to ${{ inputs.function_name }}"
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+        with:
+          role-to-assume: arn:aws:iam::${{ matrix.aws_account_id }}:role/${{ inputs.role_name }}
+          aws-region: ${{ matrix.aws_region }}
+          role-session-name: ${{ inputs.role_name }}
+          action-timeout-s: 45
+          retry-max-attempts: 3
 
+      - uses: kosli-dev/setup-cli-action@060e7f9bf6ac246743d6a62c5df847dfe7050867 # v5.2.1
+        if: env.KOSLI_API_TOKEN != '' && env.KOSLI_FLOW != ''
+        with:
+          version: ${{ inputs.kosli_cli_version }}
+
+      # Lambda reports the code's SHA-256 in base64; Kosli fingerprints in hex.
+      - name: Compare the running code with the package
+        run: |
+          set -euo pipefail
+          running=$(aws lambda get-function --function-name "$FUNCTION_NAME" \
+            --query Configuration.CodeSha256 --output text | base64 -d | od -An -tx1 | tr -d ' \n')
+
+          old_commit=""
+          if [ -n "$KOSLI_API_TOKEN" ] && [ -n "$KOSLI_FLOW" ]; then
+            old_commit=$(kosli get artifact "$KOSLI_FLOW@$running" --output json 2>/dev/null \
+              | jq -r '[.. | objects | .git_commit? | strings][0] // empty' || true)
+          fi
+
+          short() { printf '`%s`' "${1:0:12}"; }
+          trail_url="$KOSLI_HOST/$KOSLI_ORG/flows/$KOSLI_FLOW/trails/$NEW_COMMIT"
+          {
+            echo "### $FUNCTION_NAME in $ACCOUNT ($REGION)"
+            echo
+            echo "| | Fingerprint | Commit |"
+            echo "|---|---|---|"
+            echo "| Running | $(short "$running") | ${old_commit:+$(short "$old_commit")} |"
+            echo "| Will deploy | $(short "$FINGERPRINT") | ${NEW_COMMIT:+$(short "$NEW_COMMIT")} |"
+            echo
+            if [ "$running" = "$FINGERPRINT" ]; then
+              echo "**No change:** the account already runs this package."
+            elif [ -n "$old_commit" ] && [ -n "$NEW_COMMIT" ]; then
+              echo "**Change:** [${old_commit:0:12}...${NEW_COMMIT:0:12}]($REPOSITORY_URL/compare/$old_commit...$NEW_COMMIT)"
+            elif [ -n "$KOSLI_API_TOKEN" ] && [ -n "$KOSLI_FLOW" ]; then
+              echo "**Change:** the running code is not an artifact of \`$KOSLI_FLOW\`, so it has no build trail."
+            else
+              echo "**Change:** the code changes; without a Kosli flow and token the running code's commit is unknown."
+            fi
+            if [ -n "$KOSLI_FLOW" ] && [ -n "$NEW_COMMIT" ]; then
+              echo
+              echo "Build trail, with its control decisions: $trail_url"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # With github_environment set, the deploys wait on its protection rules, and
+  # one approval releases every account's deploy.
   deploy:
     name: Deploy to ${{ matrix.name }}
-    needs: [accounts, approval]
-    if: ${{ !cancelled() && needs.accounts.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.approval.result) }}
+    needs: [accounts, plan]
+    environment: ${{ inputs.github_environment }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
