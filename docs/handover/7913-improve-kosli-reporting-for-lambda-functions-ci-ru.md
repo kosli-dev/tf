@@ -36,7 +36,7 @@ source, with the PR that reviewed it and a decision per control.
       (terraform-base-infra#1247)
 - [x] Golden pipeline: a reusable workflow in this repo that zips, tests, uploads, attests, evaluates the controls
       and deploys to staging, then prod after approval (#46)
-- [ ] Pilot: `kosli-queue-sampler` (terraform-server#685 merged; first run pending)
+- [x] Pilot: `kosli-queue-sampler` (terraform-server#685)
 - [ ] Remaining flavour A functions
 - [ ] Flavour D (notify-slack), built from the pinned module source
 - [ ] Flavour C (`upload-package` in terraform-aws-evidence-reporter attests its zip)
@@ -58,7 +58,10 @@ source, with the PR that reviewed it and a decision per control.
 | sdlc-policies `7913-dependencies-zip-variant` | sdlc-policies#60 | merged |
 | terraform-base-infra `7913-lambda-deploy-role` | terraform-base-infra#1251 (prod: #1253) | merged |
 | terraform-server `7913-queue-sampler-pipeline` | terraform-server#685 | merged |
-| `7913-lambda-params-fix` | — | in progress |
+| `7913-lambda-params-fix` | #47 | merged |
+| sdlc-policies `7913-unit-tests-only` | sdlc-policies#61 | merged |
+| `7913-unit-tests-only-pin` | #48 | merged |
+| `7913-deploy-lambda-plan` | — | in progress |
 
 ---
 
@@ -82,6 +85,8 @@ source, with the PR that reviewed it and a decision per control.
 - A function whose code the pipeline deploys is a plain `aws_lambda_function` with its package in `ignore_changes`, not a `terraform-aws-modules/lambda` call: the module names its package after the content and the provider swaps the code when the name changes, so any apply after a source change would put back an unattested build. The module's `ignore_source_code_hash` leaves the name tracked; a fixed placeholder package was rejected because the first apply swaps it in and breaks the function; Terraform downloading the deployed package by a pointer was rejected for a drift diff after every deploy; moving each function's Terraform into its own repo was rejected for the extra applies a new environment would need. The module still builds the package a new environment's function starts with.
 - Each repo deploys with its own role, trusting only `deploy-lambda.yml` on main, rather than with its Terraform role, so the deploy can swap code and nothing else.
 - Production deploys wait on a GitHub environment named `production` with `tech-team` as required reviewer and `master` as the only deployment branch, the same name and gate as the proposal to replace the prod branch.
+- SDLC-CTRL-0008 lets a consumer require the unit-test suite alone (sdlc-policies#61), because the Lambda functions have unit tests only; this lowers the control's floor for every consumer that asks for it.
+- A deploy shows a plan before its approval, one job summary per account naming the fingerprint and commit it runs and will run, because a code swap has no Terraform plan to review; the gate sits on the deploy jobs themselves, since one approval releases every job waiting on the environment.
 
 ---
 
@@ -94,8 +99,10 @@ source, with the PR that reviewed it and a decision per control.
       resources ignoring its package, the unqualified EventBridge permission only, and the `production` environment
       (terraform-server#685, terraform-base-infra#1251)
 - [x] `lambda-package-publisher`'s trust on `job_workflow_ref`: the pilot's first build uploaded
-- [ ] The pilot's first run failed in the control decisions: the build passed empty params, because `jq` read the
-      empty stdin; fixed by `jq -n` in this branch. Re-run `queue-sampler.yml` once it is merged
-- [ ] `terraform-server-lambda-deploy`'s trust on `job_workflow_ref` is verified only by the first deploy
+- [x] The pilot deployed to staging, infra-dev and production with all four decisions passing, after `jq -n`
+      (#47) and the unit-tests-only floor (sdlc-policies#61, #48); `terraform-server-lambda-deploy`'s trust works
+- [ ] The deploy plan: `queue-sampler.yml` passes `kosli_flow`, `kosli_trail` and the Kosli token; the first run
+      verifies the commit lookup, that an empty `github_environment` deploys without one, and that one approval
+      releases every production account
 - [ ] The remaining flavour A functions, with a shared function module once a second one shows the shape
 - [ ] README documentation of `build-lambda.yml` and `deploy-lambda.yml`
