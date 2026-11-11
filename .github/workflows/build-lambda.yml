@@ -324,7 +324,7 @@ jobs:
     needs: [build]
     # The controls' params are read at this pin, but each policy runs at the
     # version currently published in Kosli.
-    uses: kosli-dev/sdlc-policies/.github/workflows/evaluate-policy.yml@3dd1d7e6f84e65074474accdb043427ae15dec71
+    uses: kosli-dev/sdlc-policies/.github/workflows/evaluate-policy.yml@383bcb19ad12e9b47ec3dfc2f12212c1b0253d3b
     with:
       controls: ${{ inputs.controls }}
       params: ${{ needs.build.outputs.params }}
