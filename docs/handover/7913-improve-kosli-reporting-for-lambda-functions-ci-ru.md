@@ -1,6 +1,6 @@
 # Issue #7913: Improve kosli reporting for lambda-functions CI runs
 
-> **Last updated:** 2026-11-10
+> **Last updated:** 2026-11-11
 > **Issue:** https://github.com/kosli-dev/server/issues/7913
 > **Collaborators:** Tore Martin Hagen (engineer), Claude (claude-opus-5-5)
 
@@ -32,11 +32,11 @@ source, with the PR that reviewed it and a decision per control.
 
 ## Plan
 
-- [ ] Package bucket in the dev account, overwrites blocked, readable by each repo's deploy role
-      (terraform-base-infra)
-- [ ] Golden pipeline: a reusable workflow in this repo that zips, tests, uploads, attests, evaluates the controls
-      and deploys to staging, then prod after approval
-- [ ] Pilot: `kosli-queue-sampler` (terraform-server)
+- [x] Package bucket in the dev account, overwrites blocked, readable by each repo's deploy role
+      (terraform-base-infra#1247)
+- [x] Golden pipeline: a reusable workflow in this repo that zips, tests, uploads, attests, evaluates the controls
+      and deploys to staging, then prod after approval (#46)
+- [ ] Pilot: `kosli-queue-sampler` (terraform-server#685 merged; first run pending)
 - [ ] Remaining flavour A functions
 - [ ] Flavour D (notify-slack), built from the pinned module source
 - [ ] Flavour C (`upload-package` in terraform-aws-evidence-reporter attests its zip)
@@ -50,12 +50,15 @@ source, with the PR that reviewed it and a decision per control.
 
 | Branch | PR | Status |
 |--------|----|--------|
-| `7913-lambda-golden-pipeline` | — | in progress |
+| `7913-lambda-golden-pipeline` | #46 | merged |
 | terraform-base-infra `7913-lambda-package-bucket` | terraform-base-infra#1247 | merged |
 | sdlc-policies `7913-policy-variants` | sdlc-policies#59 | merged |
-| server `7913-sdlc-policies-variants` | #7934 | open |
-| opa-lambda `7913-sdlc-policies-variants` | opa-lambda#40 | open |
+| server `7913-sdlc-policies-variants` | #7934 | merged |
+| opa-lambda `7913-sdlc-policies-variants` | opa-lambda#40 | merged |
 | sdlc-policies `7913-dependencies-zip-variant` | sdlc-policies#60 | merged |
+| terraform-base-infra `7913-lambda-deploy-role` | terraform-base-infra#1251 (prod: #1253) | merged |
+| terraform-server `7913-queue-sampler-pipeline` | terraform-server#685 | merged |
+| `7913-lambda-params-fix` | — | in progress |
 
 ---
 
@@ -76,6 +79,9 @@ source, with the PR that reviewed it and a decision per control.
 - SDLC-CTRL-0004 has one policy per packaging variant in sdlc-policies (`image/`, `zip/`) rather than one policy with parameters, so each reads as what it checks; the variant is named by the consumer and the decision name stays `dependencies-decision`.
 - For a zip, the Lambda runtime is the base image: the build attests the runtime it built for and the zip policy requires it, and `boto3` is bundled and locked rather than taken from the runtime, so an empty lockfile means the code uses only the standard library; every package the SBOM finds in the zip must be in the lockfile.
 - The golden pipeline is two workflows: `build-lambda.yml` builds, tests, uploads and attests, and `deploy-lambda.yml` swaps the code, so a module repo can dispatch a deploy to its callers without rebuilding; only the build may write to the package bucket.
+- A function whose code the pipeline deploys is a plain `aws_lambda_function` with its package in `ignore_changes`, not a `terraform-aws-modules/lambda` call: the module names its package after the content and the provider swaps the code when the name changes, so any apply after a source change would put back an unattested build. The module's `ignore_source_code_hash` leaves the name tracked; a fixed placeholder package was rejected because the first apply swaps it in and breaks the function; Terraform downloading the deployed package by a pointer was rejected for a drift diff after every deploy; moving each function's Terraform into its own repo was rejected for the extra applies a new environment would need. The module still builds the package a new environment's function starts with.
+- Each repo deploys with its own role, trusting only `deploy-lambda.yml` on main, rather than with its Terraform role, so the deploy can swap code and nothing else.
+- Production deploys wait on a GitHub environment named `production` with `tech-team` as required reviewer and `master` as the only deployment branch, the same name and gate as the proposal to replace the prod branch.
 
 ---
 
@@ -84,7 +90,12 @@ source, with the PR that reviewed it and a decision per control.
 - [x] Package bucket (terraform-base-infra#1247)
 - [x] Golden pipeline inputs and outputs; `build-lambda.yml` and `deploy-lambda.yml` written
 - [x] SDLC-CTRL-0004 for zips: the `zip` variant (sdlc-policies#59, #60), used by `build-lambda.yml`
-- [ ] Pilot: `boto3` declared in `kosli-queue-sampler`'s `pyproject.toml`, a deploy role for terraform-server in
-      each account (`modules/iam`), `ignore_changes` on the function's code, and a check that the EventBridge permission, which the module qualifies with the
-      function version, still matches once versions are published outside Terraform
-- [ ] `lambda-package-publisher`'s trust on `job_workflow_ref` is verified only by the first build run
+- [x] Pilot: `boto3` locked, deploy role `terraform-server-lambda-deploy` in every account, the function as plain
+      resources ignoring its package, the unqualified EventBridge permission only, and the `production` environment
+      (terraform-server#685, terraform-base-infra#1251)
+- [x] `lambda-package-publisher`'s trust on `job_workflow_ref`: the pilot's first build uploaded
+- [ ] The pilot's first run failed in the control decisions: the build passed empty params, because `jq` read the
+      empty stdin; fixed by `jq -n` in this branch. Re-run `queue-sampler.yml` once it is merged
+- [ ] `terraform-server-lambda-deploy`'s trust on `job_workflow_ref` is verified only by the first deploy
+- [ ] The remaining flavour A functions, with a shared function module once a second one shows the shape
+- [ ] README documentation of `build-lambda.yml` and `deploy-lambda.yml`
