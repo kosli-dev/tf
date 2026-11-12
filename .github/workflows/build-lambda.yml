@@ -57,6 +57,9 @@ on:
       fingerprint:
         description: "SHA-256 of the package, as Kosli and the Lambda environment fingerprint it."
         value: ${{ jobs.build.outputs.fingerprint }}
+      artifact_name:
+        description: "Actions artifact in this run that holds the package as package.zip, for a caller that publishes it elsewhere."
+        value: ${{ jobs.build.outputs.artifact_name }}
       kosli_flow:
         value: ${{ jobs.build.outputs.kosli_flow }}
       kosli_trail:
@@ -73,6 +76,7 @@ jobs:
     outputs:
       s3_key: ${{ steps.upload.outputs.s3_key }}
       fingerprint: ${{ steps.package.outputs.fingerprint }}
+      artifact_name: lambda-package-${{ inputs.package_name }}
       params: ${{ steps.params.outputs.json }}
       kosli_flow: ${{ env.KOSLI_FLOW }}
       kosli_trail: ${{ env.KOSLI_TRAIL }}
@@ -164,6 +168,12 @@ jobs:
           echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
           echo "Package fingerprint: $fingerprint" >> "$GITHUB_STEP_SUMMARY"
 
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: lambda-package-${{ inputs.package_name }}
+          path: ${{ runner.temp }}/package.zip
+          if-no-files-found: error
+
       - name: Run the tests
         id: tests
         run: |
@@ -192,15 +202,17 @@ jobs:
           action-timeout-s: 45
           retry-max-attempts: 3
 
-      # The bucket refuses a write that could replace a key. A re-run builds the
-      # same bytes, so an existing key is accepted when its checksum matches.
+      # The bucket refuses a write that could replace a key. The key names the
+      # fingerprint, because one commit can build several packages, such as one
+      # per bundled CLI release. A re-run builds the same bytes, so an existing
+      # key is accepted when its checksum matches.
       - name: Upload the package
         id: upload
         env:
           BUCKET: ${{ inputs.package_bucket }}
           FINGERPRINT: ${{ steps.package.outputs.fingerprint }}
         run: |
-          key="${GITHUB_REPOSITORY#*/}/${{ inputs.package_name }}/$GITHUB_SHA.zip"
+          key="${GITHUB_REPOSITORY#*/}/${{ inputs.package_name }}/$GITHUB_SHA/$FINGERPRINT.zip"
           echo "s3_key=$key" >> "$GITHUB_OUTPUT"
           if aws s3api put-object --bucket "$BUCKET" --key "$key" \
                --body "$RUNNER_TEMP/package.zip" --if-none-match '*' \
