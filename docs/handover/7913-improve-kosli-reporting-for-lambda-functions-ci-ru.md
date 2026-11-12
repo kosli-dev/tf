@@ -1,6 +1,6 @@
 # Issue #7913: Improve kosli reporting for lambda-functions CI runs
 
-> **Last updated:** 2026-11-11
+> **Last updated:** 2026-11-12
 > **Issue:** https://github.com/kosli-dev/server/issues/7913
 > **Collaborators:** Tore Martin Hagen (engineer), Claude (claude-opus-5-5)
 
@@ -37,7 +37,9 @@ source, with the PR that reviewed it and a decision per control.
 - [x] Golden pipeline: a reusable workflow in this repo that zips, tests, uploads, attests, evaluates the controls
       and deploys to staging, then prod after approval (#46)
 - [x] Pilot: `kosli-queue-sampler` (terraform-server#685)
-- [ ] Remaining flavour A functions
+- [ ] Remaining flavour A functions: `kosli-queue-sampler`, `terraform-statefile-paths-reporter`,
+      `docdb-pass-rotation` and `kosli-docdb-creds-reporter` are on `lambda-function/v1` (terraform-server#691,
+      #694, terraform-base-infra#1268); the bedrock action groups remain
 - [ ] Flavour D (notify-slack), built from the pinned module source
 - [ ] Flavour C (`upload-package` in terraform-aws-evidence-reporter attests its zip)
 - [ ] Flavour B → C (terraform-modules backup, terraform-aws-kosli-instance-access-reporter)
@@ -61,7 +63,20 @@ source, with the PR that reviewed it and a decision per control.
 | `7913-lambda-params-fix` | #47 | merged |
 | sdlc-policies `7913-unit-tests-only` | sdlc-policies#61 | merged |
 | `7913-unit-tests-only-pin` | #48 | merged |
-| `7913-deploy-lambda-plan` | — | in progress |
+| `7913-deploy-lambda-plan` | #49 | merged |
+| terraform-server `7913-queue-sampler-plan` | terraform-server#688 | merged |
+| terraform-modules `7913-lambda-function-module` | terraform-modules#29 | merged |
+| terraform-server `7913-queue-sampler-lambda-module` | terraform-server#691 (prod: #693) | merged |
+| terraform-base-infra `7913-paths-reporter-deploy-role` | terraform-base-infra#1260 (prod: #1261) | merged |
+| terraform-server `7913-paths-reporter-lambda-module` | terraform-server#694 (prod: #693) | merged |
+| terraform-modules `backup-v10-lambda-8` | terraform-modules#30 | merged |
+| terraform-base-infra `fix-apply-role-backup-storage`, `backup-postgresql-v10` | terraform-base-infra#1263, #1264 | merged |
+| terraform-modules `7913-lambda-function-role-name` | terraform-modules#31 | merged |
+| terraform-base-infra `7913-base-infra-lambda-deploy-role` | terraform-base-infra#1267 (prod: #1272) | merged |
+| terraform-modules `7913-lambda-function-ignore-s3-source` | terraform-modules#32 | merged |
+| terraform-modules `7913-lambda-function-source-account` | terraform-modules#33 | merged |
+| terraform-base-infra `7913-docdb-lambdas-module` | terraform-base-infra#1268 (prod: #1272) | merged |
+| `7913-handover-lambda-module` | #50 | open |
 
 ---
 
@@ -87,6 +102,11 @@ source, with the PR that reviewed it and a decision per control.
 - Production deploys wait on a GitHub environment named `production` with `tech-team` as required reviewer and `master` as the only deployment branch, the same name and gate as the proposal to replace the prod branch.
 - SDLC-CTRL-0008 lets a consumer require the unit-test suite alone (sdlc-policies#61), because the Lambda functions have unit tests only; this lowers the control's floor for every consumer that asks for it.
 - A deploy shows a plan before its approval, one job summary per account naming the fingerprint and commit it runs and will run, because a code swap has no Terraform plan to review; the gate sits on the deploy jobs themselves, since one approval releases every job waiting on the environment.
+- Functions whose code the pipeline deploys share one module, `lambda-function/v1` in terraform-modules, so each gets the same split between Terraform and the pipeline; it has no `layers` input, so everything a function runs is in its attested package.
+- A function that runs in several accounts with per-account data carries every account's data in one package and picks it by environment variable, so every account runs the same attested package.
+- When a function moves from a layer to bundled code, production gets the pipeline's deploy before the Terraform change that drops the layer, so the function is never left without its dependency.
+- `lambda-function/v1` ignores a function's S3 code source as well as its local package, so a function that was deployed from S3 moves onto the module without Terraform clearing its only code source.
+- `lambda-function/v1` roles trust Lambda only when it acts for the role's own account, so moving a function onto the module keeps the confused-deputy guard its role had.
 
 ---
 
@@ -101,8 +121,14 @@ source, with the PR that reviewed it and a decision per control.
 - [x] `lambda-package-publisher`'s trust on `job_workflow_ref`: the pilot's first build uploaded
 - [x] The pilot deployed to staging, infra-dev and production with all four decisions passing, after `jq -n`
       (#47) and the unit-tests-only floor (sdlc-policies#61, #48); `terraform-server-lambda-deploy`'s trust works
-- [ ] The deploy plan: `queue-sampler.yml` passes `kosli_flow`, `kosli_trail` and the Kosli token; the first run
-      verifies the commit lookup, that an empty `github_environment` deploys without one, and that one approval
-      releases every production account
-- [ ] The remaining flavour A functions, with a shared function module once a second one shows the shape
+- [x] The deploy plan: `queue-sampler.yml` passes `kosli_flow`, `kosli_trail` and the Kosli token
+      (terraform-server#688); its run showed the commit lookup, staging deploying without an environment, and one
+      approval releasing every production account
+- [x] Shared function module `lambda-function/v1` (terraform-modules#29), used by the queue sampler (terraform-server#691)
+- [x] `terraform-statefile-paths-reporter` on the module, with the Kosli CLI 2.18.0 bundled (terraform-server#694,
+      terraform-base-infra#1260); deployed to every account, staging snapshot 406 taken by the new code
+- [x] `docdb-pass-rotation` and `kosli-docdb-creds-reporter` on the module, with their own deploy role
+      `terraform-base-infra-lambda-deploy` (terraform-base-infra#1267, #1268); deployed to every account, prod
+      snapshot 56 compliant with both on the pipeline's build
+- [ ] The bedrock action groups
 - [ ] README documentation of `build-lambda.yml` and `deploy-lambda.yml`
