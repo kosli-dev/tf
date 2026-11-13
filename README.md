@@ -314,12 +314,10 @@ Both workflows can optionally attest each Terraform run to Kosli.  This is opt-i
 * attest the plan output (and, for apply, the apply log) as generic attestations,
 * when `checkov` is set, attest the Checkov report with the `checkov` custom attestation type
   (managed in `terraform-kosli-app`), which Kosli evaluates so the trail is non-compliant on any
-  failed check or parsing error even while `checkov_soft_fail` keeps the job green,
+  failed check or parsing error even while `checkov_soft_fail` keeps the job green, and
 * in `apply.yml`, additionally attest the **state file** and the **drift plan** as artifacts so
   that any later out-of-band change to either file is detected as drift by the downstream
-  [drift-detection job][drift-doc], and
-* in `apply.yml`, attest each zip-packaged Lambda function in the state as an artifact named
-  `lambda-<function name>`, with the fingerprint a Kosli Lambda environment reports for it.
+  [drift-detection job][drift-doc].
 
 A failed `tf apply` attests nothing, deliberately. Terraform writes the state file as it goes, so
 an apply that fails part-way can leave a rewritten state file that has no provenance in Kosli, and
