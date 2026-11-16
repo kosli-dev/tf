@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       source_path:
-        description: "Directory (in the caller repo) zipped into the package. A uv.lock or requirements.txt in it is installed into the package."
+        description: "Directory (in the caller repo) zipped into the package. A uv.lock or requirements.txt in it is installed into the package. Tests (test_*.py) run from it; a tests/ directory at its top is left out of the package."
         required: true
         type: string
       python_version:
@@ -136,6 +136,7 @@ jobs:
             --exclude 'pyproject.toml' --exclude 'uv.lock' \
             --exclude 'requirements*.txt' \
             --exclude '.venv' --exclude '__pycache__' --exclude '.pytest_cache' \
+            --exclude '/tests/' \
             "$SOURCE_PATH/" "$BUILD_DIR/"
 
       - name: Bundle the Kosli CLI
@@ -178,7 +179,9 @@ jobs:
         id: tests
         run: |
           mkdir -p "$RUNNER_TEMP/junit"
-          if [ -z "$(find "$SOURCE_PATH" -maxdepth 1 -name 'test_*.py' -print -quit)" ]; then
+          # Tests may sit beside the code or in a tests/ directory, which is left
+          # out of the package.
+          if [ -z "$(find "$SOURCE_PATH" -name 'test_*.py' -not -path '*/.venv/*' -print -quit)" ]; then
             echo "ran=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
