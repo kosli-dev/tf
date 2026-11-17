@@ -1,0 +1,240 @@
+name: Evaluate SDLC controls
+
+# The decision is recorded where the published policy runs, at the version
+# current in Kosli rather than at the consumer's pin, so no compliance value
+# passes through this workflow. The consumer's `params` do, but only the keys and
+# values a control lists in its overridable-params.json, so a consumer can choose
+# only among settings reviewed in kosli-dev/sdlc-policies.
+#
+# It lives here rather than in kosli-dev/sdlc-policies because that repository is
+# internal, and GitHub lets a public repository call only public workflows.
+
+on:
+  workflow_call:
+    inputs:
+      policies_ref:
+        description: >-
+          Full commit SHA of kosli-dev/sdlc-policies to read the controls'
+          params, variants and the CLI version from. A policy change reaches a
+          consumer's params only when the consumer moves this pin.
+        required: true
+        type: string
+      controls:
+        description: >-
+          JSON array of the control identifiers to evaluate, e.g.
+          '["SDLC-CTRL-0004", "SDLC-CTRL-0008"]'. A control added to
+          sdlc-policies is not evaluated by a consumer until that consumer names it.
+        required: true
+        type: string
+      params:
+        description: >-
+          JSON object of params per control, e.g.
+          '{"SDLC-CTRL-0007": {"protected_branch": "main"}}'. Each key in a
+          control's entry replaces that key in its params.json, and the key and
+          its value have to be listed in the control's overridable-params.json.
+          A control without an
+          entry runs on its params.json alone. Every control named has to be in
+          `controls`.
+        required: false
+        default: '{}'
+        type: string
+      variants:
+        description: >-
+          JSON object naming the policy variant per control, e.g.
+          '{"SDLC-CTRL-0004": "zip"}', for a control whose directory holds one
+          policy per variant. A control without an entry runs the default its
+          variants.json names. Every control named has to be in `controls`.
+        required: false
+        default: '{}'
+        type: string
+      trail:
+        description: The trail to evaluate, usually the commit sha.
+        required: true
+        type: string
+      fingerprint:
+        description: Fingerprint of the artifact the decision is attested to.
+        required: true
+        type: string
+      flow:
+        description: The flow the trail belongs to.
+        required: true
+        type: string
+      org:
+        description: >-
+          The Kosli org. The controls' policies are published to org `kosli`
+          only, so another org cannot evaluate them until sdlc-policies'
+          publish.yml names it as a target.
+        required: true
+        type: string
+      host:
+        description: >-
+          The Kosli host, or a comma-separated list of them where the consumer
+          attests to more than one. The policies are published to
+          https://app.kosli.com and https://staging.app.kosli.com only.
+        required: false
+        default: https://app.kosli.com
+        type: string
+    secrets:
+      api_token:
+        description: >-
+          The Kosli API token, matching `host` positionally where that names
+          more than one.
+        required: true
+      policies_token:
+        description: >-
+          A token that can read kosli-dev/sdlc-policies. A caller's
+          GITHUB_TOKEN reaches only its own repository, and the policies are
+          checked out from that one.
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    name: ${{ matrix.control }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      # A consumer reading a red run wants every control's answer, not the first.
+      fail-fast: false
+      matrix:
+        control: ${{ fromJSON(inputs.controls) }}
+    env:
+      KOSLI_ORG: ${{ inputs.org }}
+      KOSLI_HOST: ${{ inputs.host }}
+      KOSLI_FLOW: ${{ inputs.flow }}
+      KOSLI_TRAIL: ${{ inputs.trail }}
+      KOSLI_API_TOKEN: ${{ secrets.api_token }}
+    steps:
+      # A branch or tag would let the params change under a consumer without a
+      # commit of its own, and an empty ref checks out the default branch.
+      - name: Check the policies are pinned to a commit
+        env:
+          POLICIES_REF: ${{ inputs.policies_ref }}
+        run: |
+          if ! [[ "${POLICIES_REF}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::policies_ref must be a full commit SHA, not '${POLICIES_REF}'"
+            exit 1
+          fi
+
+      - name: Checkout the policies
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: kosli-dev/sdlc-policies
+          ref: ${{ inputs.policies_ref }}
+          token: ${{ secrets.policies_token }}
+
+      # The pin is read from test.env rather than taken from the consumer, so the
+      # CLI deciding a control is the one sdlc-policies' tests ran against.
+      - name: Read the CLI pin from test.env
+        id: pin
+        run: |
+          source test.env
+          echo "cli-version=${KOSLI_CLI_VERSION}" >> "${GITHUB_OUTPUT}"
+
+      - uses: kosli-dev/setup-cli-action@060e7f9bf6ac246743d6a62c5df847dfe7050867 # v5.2.1
+        with:
+          version: ${{ steps.pin.outputs.cli-version }}
+
+      # A control is one directory, named <id>-<slug>; the slug is also the
+      # decision's name. The directory holds the policy, or one subdirectory per
+      # variant, each published as <id>-<variant>, so every variant records the
+      # same decision.
+      - name: Locate ${{ matrix.control }}
+        id: control
+        env:
+          CONTROL: ${{ matrix.control }}
+          CONTROLS: ${{ inputs.controls }}
+          VARIANTS: ${{ inputs.variants }}
+        run: |
+          set -euo pipefail
+          if ! jq -e --argjson controls "${CONTROLS}" '
+               type == "object"
+               and all(.[]; type == "string" and test("^[a-z0-9][a-z0-9-]*$"))
+               and (keys - $controls == [])' <<< "${VARIANTS}" > /dev/null; then
+            echo "::error::variants must be an object of variant names (lowercase letters, digits and hyphens), keyed by controls named in controls"
+            exit 1
+          fi
+          shopt -s nullglob
+          dirs=(policies/"${CONTROL}"-*/)
+          if [ ${#dirs[@]} -ne 1 ]; then
+            echo "::error::${CONTROL} matches ${#dirs[@]} directories under policies/"
+            exit 1
+          fi
+          dir="${dirs[0]%/}"
+          decision_name="$(basename "${dir}" | sed "s/^${CONTROL}-//")-decision"
+          variant=$(jq -r --arg c "${CONTROL}" '.[$c] // empty' <<< "${VARIANTS}")
+          if [ -f "${dir}/policy.rego" ]; then
+            if [ -n "${variant}" ]; then
+              echo "::error::${CONTROL} has no variants, so variant ${variant} cannot be chosen"
+              exit 1
+            fi
+            identifier="${CONTROL}"
+          else
+            variant="${variant:-$(jq -r '.default' "${dir}/variants.json")}"
+            if [ ! -f "${dir}/${variant}/policy.rego" ]; then
+              echo "::error::${CONTROL} has no variant ${variant}"
+              exit 1
+            fi
+            dir="${dir}/${variant}"
+            identifier="${CONTROL}-${variant}"
+          fi
+          {
+            echo "identifier=${identifier}"
+            echo "params=${dir}/params.json"
+            echo "overridable=${dir}/overridable-params.json"
+            echo "decision-name=${decision_name}"
+          } >> "${GITHUB_OUTPUT}"
+
+      # No --assert: a denial is a verdict to record rather than a reason to end
+      # the run.
+      - name: Evaluate and record ${{ matrix.control }}
+        env:
+          CONTROL: ${{ matrix.control }}
+          IDENTIFIER: ${{ steps.control.outputs.identifier }}
+          PARAMS: ${{ steps.control.outputs.params }}
+          OVERRIDABLE: ${{ steps.control.outputs.overridable }}
+          DECISION_NAME: ${{ steps.control.outputs.decision-name }}
+          FINGERPRINT: ${{ inputs.fingerprint }}
+          CONTROLS: ${{ inputs.controls }}
+          CONSUMER_PARAMS: ${{ inputs.params }}
+        run: |
+          set -euo pipefail
+          # A key naming no evaluated control, a typo say, would otherwise leave
+          # its control on the defaults without a word.
+          if ! jq -e --argjson controls "${CONTROLS}" '
+               type == "object"
+               and all(.[]; type == "object")
+               and (keys - $controls == [])' <<< "${CONSUMER_PARAMS}" > /dev/null; then
+            echo "::error::params must be an object of objects, keyed by controls named in controls"
+            exit 1
+          fi
+          overrides=$(jq -c --arg c "${CONTROL}" '.[$c] // {}' <<< "${CONSUMER_PARAMS}")
+          refused=$(jq -r --argjson allowed "$(cat "${OVERRIDABLE}" 2>/dev/null || echo '{}')" \
+            '[to_entries[] | select(.value as $v | $allowed[.key] // [] | index([$v]) | not)
+              | "\(.key)=\(.value | tojson)"] | join(", ")' <<< "${overrides}")
+          if [ -n "${refused}" ]; then
+            echo "::error::${CONTROL} does not let a consumer set: ${refused}"
+            exit 1
+          fi
+          params_args=()
+          if [ -f "${PARAMS}" ] || [ "${overrides}" != "{}" ]; then
+            merged="${RUNNER_TEMP}/params.json"
+            jq --argjson overrides "${overrides}" '. + $overrides' \
+              <(if [ -f "${PARAMS}" ]; then cat "${PARAMS}"; else echo '{}'; fi) > "${merged}"
+            # The params decide what the control checks, so the log shows them.
+            echo "Params for ${CONTROL}:"
+            cat "${merged}"
+            params_args=(--params "@${merged}")
+          fi
+          # The decision is recorded in KOSLI_FLOW and KOSLI_TRAIL, which the job
+          # exports, so --flow and --trail are not written out.
+          kosli evaluate policy \
+            --context trail="${KOSLI_FLOW}/${KOSLI_TRAIL}" \
+            --identifier "${IDENTIFIER}" \
+            "${params_args[@]}" \
+            --control "${CONTROL}" \
+            --name "${DECISION_NAME}" \
+            --fingerprint "${FINGERPRINT}" \
+            --output json

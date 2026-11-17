@@ -339,8 +339,9 @@ jobs:
     needs: [build]
     # The controls' params are read at this pin, but each policy runs at the
     # version currently published in Kosli.
-    uses: kosli-dev/sdlc-policies/.github/workflows/evaluate-policy.yml@db18f5fc695c20c4cba808d6826d9c95efd13274
+    uses: kosli-dev/tf/.github/workflows/evaluate-policy.yml@main
     with:
+      policies_ref: db18f5fc695c20c4cba808d6826d9c95efd13274
       controls: ${{ inputs.controls }}
       params: ${{ needs.build.outputs.params }}
       variants: '{"SDLC-CTRL-0004": "zip"}'
