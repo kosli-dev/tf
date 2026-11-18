@@ -16,7 +16,11 @@ on:
         type: string
       environments:
         description: "Account types to deploy to, as terraform-deploy-matrix selects them, e.g. '\"staging\"' or '\"production\"'."
-        required: true
+        default: '""'
+        type: string
+      names:
+        description: "Accounts to deploy to by name, e.g. '\"prod\"', for a function that runs in only some accounts of a type. Selected in addition to environments."
+        default: '""'
         type: string
       github_environment:
         description: "GitHub environment whose protection rules, such as a required reviewer, must pass before any account is deployed to. Empty deploys without one."
@@ -62,6 +66,7 @@ jobs:
         uses: kosli-dev/terraform-deploy-matrix@main
         with:
           environments: ${{ inputs.environments }}
+          names: ${{ inputs.names }}
 
   # What each account runs and what it will run, in the job summary, so a
   # reviewer of the deploy sees it before approving.
