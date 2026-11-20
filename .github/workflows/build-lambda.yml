@@ -19,6 +19,18 @@ on:
         description: "Tag, branch or SHA of the source to build. Empty means the caller's commit, or the default branch of source_repository."
         default: ""
         type: string
+      upstream_repository:
+        description: "Public third-party repository (owner/name) whose code is copied into source_path before the build, when the caller keeps only a pin and a lockfile of it. Unlike source_repository, the trail, the commit and the pull request stay the caller's: the change that was reviewed is the caller's pin. Empty copies nothing."
+        default: ""
+        type: string
+      upstream_ref:
+        description: "Commit of upstream_repository to copy from: a full SHA, because a tag can be moved."
+        default: ""
+        type: string
+      upstream_path:
+        description: "File or directory in upstream_repository to copy. A file lands in source_path; a directory's contents do."
+        default: ""
+        type: string
       python_version:
         description: "Python version of the Lambda runtime, e.g. 3.14. Dependencies are installed for it."
         required: true
@@ -140,6 +152,36 @@ jobs:
             echo "default_branch=$default_branch"
           } >> "$GITHUB_OUTPUT"
           echo "Source: $repository at $sha" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check out the upstream code
+        if: inputs.upstream_repository != ''
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ inputs.upstream_repository }}
+          ref: ${{ inputs.upstream_ref }}
+          path: .upstream
+          persist-credentials: false
+
+      # The caller's source_path holds the lockfile; the code itself comes from
+      # the pinned upstream commit, so none of it is copied into the caller.
+      - name: Copy the upstream code into the source
+        if: inputs.upstream_repository != ''
+        env:
+          UPSTREAM_REPOSITORY: ${{ inputs.upstream_repository }}
+          UPSTREAM_REF: ${{ inputs.upstream_ref }}
+          UPSTREAM_PATH: ${{ inputs.upstream_path }}
+        run: |
+          [[ "$UPSTREAM_REF" =~ ^[0-9a-f]{40}$ ]] \
+            || { echo "::error::upstream_ref must be a full commit SHA, got '$UPSTREAM_REF'"; exit 1; }
+          [[ -n "$UPSTREAM_PATH" && "$UPSTREAM_PATH" != /* && "$UPSTREAM_PATH" != *..* ]] \
+            || { echo "::error::upstream_path must be a path inside the repository, got '$UPSTREAM_PATH'"; exit 1; }
+          from=".upstream/$UPSTREAM_PATH"
+          [ -e "$from" ] \
+            || { echo "::error::$UPSTREAM_REPOSITORY has no $UPSTREAM_PATH at $UPSTREAM_REF"; exit 1; }
+          mkdir -p "$SOURCE_PATH"
+          if [ -d "$from" ]; then cp -R "$from/." "$SOURCE_PATH/"; else cp "$from" "$SOURCE_PATH/"; fi
+          rm -rf .upstream
+          echo "Upstream code: $UPSTREAM_REPOSITORY/$UPSTREAM_PATH at $UPSTREAM_REF" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
