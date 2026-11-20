@@ -43,6 +43,10 @@ on:
         description: "Kosli CLI release to bundle: a major version (2), resolved to its newest release, or an exact one (2.18.0). Used only when bundle_kosli_cli is true."
         default: "2"
         type: string
+      code_origin:
+        description: "Who wrote the code: 'own' or 'third-party'. The flow is tagged with it, and an environment policy can read the tag to decide which controls the flow's artifacts need. 'third-party' is accepted only with the upstream_* inputs; 'own' code must be evaluated for SDLC-CTRL-0008. Empty leaves the flow untagged."
+        default: ""
+        type: string
       controls:
         description: "JSON array of the SDLC controls to evaluate. Leave SDLC-CTRL-0008 out for code with no tests of ours, such as a third-party module."
         default: '["SDLC-CTRL-0002", "SDLC-CTRL-0004", "SDLC-CTRL-0007", "SDLC-CTRL-0008"]'
@@ -111,6 +115,32 @@ jobs:
       # so a re-run builds the same fingerprint the bucket already holds.
       SOURCE_DATE_EPOCH: "315532800"
     steps:
+      # Before anything is built: the tag must not say something the build
+      # contradicts.
+      - name: Check the code origin
+        if: inputs.code_origin != ''
+        env:
+          CODE_ORIGIN: ${{ inputs.code_origin }}
+          UPSTREAM_REPOSITORY: ${{ inputs.upstream_repository }}
+          WITH_TESTS: ${{ contains(fromJSON(inputs.controls), 'SDLC-CTRL-0008') }}
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          case "$CODE_ORIGIN" in
+            own)
+              [ -z "$UPSTREAM_REPOSITORY" ] \
+                || fail "code_origin is 'own', but the code comes from upstream_repository $UPSTREAM_REPOSITORY"
+              [ "$WITH_TESTS" = "true" ] \
+                || fail "code_origin is 'own', so controls must include SDLC-CTRL-0008"
+              ;;
+            third-party)
+              [ -n "$UPSTREAM_REPOSITORY" ] \
+                || fail "code_origin is 'third-party', which needs the upstream_* inputs"
+              ;;
+            *)
+              fail "code_origin must be 'own' or 'third-party', got '$CODE_ORIGIN'"
+              ;;
+          esac
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ${{ inputs.source_repository || github.repository }}
@@ -363,6 +393,12 @@ jobs:
             --description "Lambda package ${{ inputs.package_name }} from $SOURCE_REPOSITORY" \
             --template-file "$RUNNER_TEMP/flow-template.yml"
           kosli begin trail "$KOSLI_TRAIL" --template-file "$RUNNER_TEMP/flow-template.yml"
+
+      - name: Tag the flow with the code origin
+        if: inputs.code_origin != ''
+        env:
+          CODE_ORIGIN: ${{ inputs.code_origin }}
+        run: kosli tag flow "$KOSLI_FLOW" --set "code_origin=$CODE_ORIGIN"
 
       - name: Attest the package
         run: kosli attest artifact "$RUNNER_TEMP/package.zip"
