@@ -44,8 +44,8 @@ on:
         default: "2"
         type: string
       code_origin:
-        description: "Who wrote the code: 'own' or 'third-party'. The flow is tagged with it, and an environment policy can read the tag to decide which controls the flow's artifacts need. 'third-party' is accepted only with the upstream_* inputs; 'own' code must be evaluated for SDLC-CTRL-0008. Empty leaves the flow untagged."
-        default: ""
+        description: "Who wrote the code: 'own' or 'third-party'. The flow is tagged with it, and an environment policy can read the tag to decide which controls the flow's artifacts need. 'third-party' is accepted only with the upstream_* inputs; 'own' code must be evaluated for SDLC-CTRL-0008. Required, so every caller makes the choice."
+        required: true
         type: string
       controls:
         description: "JSON array of the SDLC controls to evaluate. Leave SDLC-CTRL-0008 out for code with no tests of ours, such as a third-party module."
@@ -118,7 +118,6 @@ jobs:
       # Before anything is built: the tag must not say something the build
       # contradicts.
       - name: Check the code origin
-        if: inputs.code_origin != ''
         env:
           CODE_ORIGIN: ${{ inputs.code_origin }}
           UPSTREAM_REPOSITORY: ${{ inputs.upstream_repository }}
@@ -395,10 +394,11 @@ jobs:
           kosli begin trail "$KOSLI_TRAIL" --template-file "$RUNNER_TEMP/flow-template.yml"
 
       - name: Tag the flow with the code origin
-        if: inputs.code_origin != ''
         env:
           CODE_ORIGIN: ${{ inputs.code_origin }}
-        run: kosli tag flow "$KOSLI_FLOW" --set "code_origin=$CODE_ORIGIN"
+        # A build from source_repository sets KOSLI_REPO_ID for the attestations,
+        # and kosli tag reads it as --repo-id, which it rejects for a flow.
+        run: env -u KOSLI_REPO_ID kosli tag flow "$KOSLI_FLOW" --set "code_origin=$CODE_ORIGIN"
 
       - name: Attest the package
         run: kosli attest artifact "$RUNNER_TEMP/package.zip"
