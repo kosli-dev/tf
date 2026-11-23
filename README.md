@@ -276,6 +276,24 @@ Suppressions belong in a `.checkov.yaml` in the working directory, which Checkov
 automatically, or as `#checkov:skip=` comments on the resource. Findings are mapped back to the HCL
 file and line that defines the resource.
 
+Findings that already exist can be recorded in a baseline, so that only new findings fail. Commit
+a `.checkov.baseline` to the working directory and the scan applies it: a finding it lists is
+counted as skipped, not failed. Checkov matches a finding by resource address and check ID alone,
+so one baseline built from every environment's plan serves them all. Create it from a directory of
+plan JSON files (`--create-baseline` fails with a single `--file`):
+
+```bash
+uvx --from checkov==3.4.3 checkov -d <directory of plan JSON files> \
+  --framework terraform_plan --repo-root-for-plan-enrichment . \
+  --quiet --compact --soft-fail --create-baseline
+```
+
+Do not set `baseline:` in `.checkov.yaml`. With a baseline loaded Checkov drops every passed check
+from its report, so the workflow scans twice, once without the baseline to count the checks that
+passed and once with it, and writes that count into the report. A `baseline:` entry in the config
+would apply to both scans and the report would read `passed: 0`. Each environment's scan therefore
+takes about twice as long when a baseline is present.
+
 Checkov needs no secrets, so it still runs on Dependabot pull requests, where the Kosli steps are
 disabled; only the attestation is skipped there.
 

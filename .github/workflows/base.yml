@@ -259,13 +259,38 @@ jobs:
           # every check, and the full text report is attached alongside it.
           # Checkov reads .checkov.yaml from the working directory, and the
           # enrichment maps each finding back to its HCL file and lines.
-          uvx --from "checkov==${CHECKOV_VERSION}" checkov \
-            --file "$PLAN_JSON" \
-            --framework terraform_plan \
-            --repo-root-for-plan-enrichment . \
-            --quiet --compact --soft-fail \
-            --output cli --output json \
-            --output-file-path "$REPORT_DIR"
+          checkov_scan() {
+            uvx --from "checkov==${CHECKOV_VERSION}" checkov \
+              --file "$PLAN_JSON" \
+              --framework terraform_plan \
+              --repo-root-for-plan-enrichment . \
+              --quiet --compact --soft-fail \
+              "$@"
+          }
+          if [ -f .checkov.baseline ]; then
+            # A baseline turns the findings it lists into skipped checks, so
+            # only new findings fail. With one loaded, Checkov also drops
+            # every passed check from the report, which would then read
+            # "passed: 0" and could not be told apart from a scan that
+            # skipped everything. So scan once without the baseline to count
+            # the checks that passed, once with it for the report, and put
+            # that count back into the report. The workflow passes
+            # --baseline itself because a "baseline:" entry in .checkov.yaml
+            # would apply to the first scan as well.
+            checkov_scan --output json --output-file-path "$REPORT_DIR/unbaselined"
+            passed=$(jq '(.summary // .) | .passed' "$REPORT_DIR/unbaselined/results_json.json")
+            checkov_scan \
+              --baseline .checkov.baseline --output-baseline-as-skipped \
+              --output cli --output json \
+              --output-file-path "$REPORT_DIR"
+            jq --argjson passed "$passed" \
+              'if has("summary") then .summary.passed = $passed else .passed = $passed end' \
+              "$REPORT_DIR/results_json.json" > "$REPORT_DIR/results_json.patched"
+            mv "$REPORT_DIR/results_json.patched" "$REPORT_DIR/results_json.json"
+            sed -i -E "s/^Passed checks: [0-9]+,/Passed checks: ${passed},/" "$REPORT_DIR/results_cli.txt"
+          else
+            checkov_scan --output cli --output json --output-file-path "$REPORT_DIR"
+          fi
           # Checkov names its reports results_cli.txt and results_json.json.
           # Rename them to match the plan files, so each is uploaded as its own
           # artifact with a unique name across the environment matrix.
