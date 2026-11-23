@@ -31,6 +31,10 @@ on:
         description: "File or directory in upstream_repository to copy. A file lands in source_path; a directory's contents do."
         default: ""
         type: string
+      include_files:
+        description: "Files outside source_path, in the same repository, copied to the root of the package: one path per line. For a file several packages share, such as a CA bundle, so the repository keeps one copy."
+        default: ""
+        type: string
       python_version:
         description: "Python version of the Lambda runtime, e.g. 3.14. Dependencies are installed for it."
         required: true
@@ -257,6 +261,20 @@ jobs:
             --exclude '/tests/' \
             "$SOURCE_PATH/" "$BUILD_DIR/"
 
+      - name: Copy the included files into the package
+        if: inputs.include_files != ''
+        env:
+          INCLUDE_FILES: ${{ inputs.include_files }}
+        run: |
+          while IFS= read -r file; do
+            [ -n "$file" ] || continue
+            [[ "$file" != /* && "$file" != *..* ]] \
+              || { echo "::error::include_files must be paths inside the repository, got '$file'"; exit 1; }
+            [ -f "$file" ] \
+              || { echo "::error::include_files: $file is not a file in the repository"; exit 1; }
+            cp "$file" "$BUILD_DIR/"
+          done <<< "$INCLUDE_FILES"
+
       - name: Bundle the Kosli CLI
         if: inputs.bundle_kosli_cli
         env:
@@ -445,6 +463,24 @@ jobs:
           kosli attest custom --fingerprint "$FINGERPRINT" \
             --type kosli-dependency-runtime --name runtime \
             --attestation-data runtime.json
+
+      # For a function Terraform deploys itself, because it also runs it during
+      # the apply: Terraform reads the newest package's key and fingerprint here.
+      # Written once the package is attested, and only for the default branch,
+      # so a build of an unmerged branch is never what Terraform deploys.
+      # latest.json is the one key the bucket lets a write replace.
+      - name: Name the package as the latest
+        if: github.ref_name == github.event.repository.default_branch
+        env:
+          BUCKET: ${{ inputs.package_bucket }}
+          KEY: ${{ steps.upload.outputs.s3_key }}
+          FINGERPRINT: ${{ steps.package.outputs.fingerprint }}
+        run: |
+          jq -n --arg s3_key "$KEY" --arg fingerprint "$FINGERPRINT" --arg commit "$SOURCE_SHA" \
+            '{s3_key: $s3_key, fingerprint: $fingerprint, commit: $commit}' > latest.json
+          aws s3api put-object --bucket "$BUCKET" \
+            --key "${GITHUB_REPOSITORY#*/}/${{ inputs.package_name }}/latest.json" \
+            --body latest.json --content-type application/json > /dev/null
 
       # evaluate-policy.yml refuses params for a control it is not asked to
       # evaluate, so SDLC-CTRL-0008's are passed only when it is.
