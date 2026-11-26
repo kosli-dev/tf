@@ -159,7 +159,7 @@ jobs:
       - name: Install uv
         # Callers that package a python Lambda build it with `uv export` and
         # `uv pip install`, run by terraform-aws-modules/lambda/aws during apply.
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
 
       - name: Check formatting
         working-directory: ${{ inputs.working_directory }}
@@ -220,9 +220,26 @@ jobs:
           if [ -z "$line" ]; then
             line="See the uploaded plan for details."
           fi
+          # Lists the addresses of the resources whose plan header ends with
+          # the given text, under a heading with their count. Prints nothing
+          # when no resource matches.
+          section() {
+            addrs=$(sed -nE "s/^  # (.*) ($2)\$/\1/p" "$plan" | sed 's/ is tainted, so$//')
+            if [ -n "$addrs" ]; then
+              echo
+              echo "**$1 ($(echo "$addrs" | wc -l))**"
+              while IFS= read -r addr; do
+                printf -- "- \`%s\`\n" "$addr"
+              done <<< "$addrs"
+            fi
+          }
           {
             echo "### ${{ inputs.environment }}"
             echo "$line"
+            section Add 'will be created'
+            section Change 'will be updated in-place'
+            section Replace 'must be replaced|will be replaced, as requested'
+            section Destroy 'will be destroyed'
           } >> "$GITHUB_STEP_SUMMARY"
           if grep -q 'No changes\.' "$plan"; then
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
