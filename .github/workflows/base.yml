@@ -228,7 +228,9 @@ jobs:
             if [ -n "$addrs" ]; then
               echo
               echo "**$1 ($(echo "$addrs" | wc -l))**"
-              echo "$addrs" | sed 's/.*/- `&`/'
+              while IFS= read -r addr; do
+                printf -- "- \`%s\`\n" "$addr"
+              done <<< "$addrs"
             fi
           }
           {
