@@ -221,7 +221,7 @@ jobs:
           python-version: ${{ inputs.python_version }}
 
       - name: Install uv
-        run: pip install --quiet uv==0.9.5
+        run: pip install --quiet uv==0.13.10
 
       # requirements-lock.txt is both what gets installed and what SDLC-CTRL-0004
       # reads as the lockfile: name==version lines with --hash=.
