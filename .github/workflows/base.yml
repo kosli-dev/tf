@@ -220,9 +220,24 @@ jobs:
           if [ -z "$line" ]; then
             line="See the uploaded plan for details."
           fi
+          # Lists the addresses of the resources whose plan header ends with
+          # the given text, under a heading with their count. Prints nothing
+          # when no resource matches.
+          section() {
+            addrs=$(sed -nE "s/^  # (.*) ($2)\$/\1/p" "$plan" | sed 's/ is tainted, so$//')
+            if [ -n "$addrs" ]; then
+              echo
+              echo "**$1 ($(echo "$addrs" | wc -l))**"
+              echo "$addrs" | sed 's/.*/- `&`/'
+            fi
+          }
           {
             echo "### ${{ inputs.environment }}"
             echo "$line"
+            section Add 'will be created'
+            section Change 'will be updated in-place'
+            section Replace 'must be replaced|will be replaced, as requested'
+            section Destroy 'will be destroyed'
           } >> "$GITHUB_STEP_SUMMARY"
           if grep -q 'No changes\.' "$plan"; then
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
